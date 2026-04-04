@@ -1,13 +1,13 @@
 ---
 name: discover-site
 description: Discover a website's full structure via sitemap/navigation crawling, extract its design system, and pull content from representative pages. Produces site-map.json, design-system.json, and per-page content files that feed into /clone-website. Use before cloning to understand the full site. Triggers on "discover site", "get site structure", "site map", "crawl site".
-argument-hint: "<base-url>"
+argument-hint: "<base-url> [--client <name>]"
 user-invocable: true
 ---
 
 # Discover Site
 
-You are about to discover and document the full structure of **$ARGUMENTS**.
+You are about to discover and document the full structure of a website.
 
 This skill produces THREE outputs that feed into the site-building process:
 1. **Site map** — every page categorized as unique or template instance
@@ -17,12 +17,24 @@ This skill produces THREE outputs that feed into the site-building process:
 ## Pre-Flight
 
 1. **Browser automation is required.** Check for available browser MCP tools (Chrome MCP, Playwright MCP, Browserbase MCP, Puppeteer MCP, etc.). Use whichever is available — if multiple exist, prefer Chrome MCP. If none are detected, ask the user which browser tool they have and how to connect it.
-2. Parse `$ARGUMENTS` as a base URL. Normalize it (add `https://` if missing, strip trailing paths to get the domain root). Verify the site is accessible.
-3. Create output directories:
-   - `docs/research/`
-   - `docs/research/content/`
-   - `docs/design-references/`
-   - `public/images/`
+2. **Parse arguments from `$ARGUMENTS`:**
+   - Extract the base URL (first non-flag argument). Normalize it (add `https://` if missing, strip trailing paths to get the domain root). Verify the site is accessible.
+   - Check for `--client <name>` flag. If present, all output goes into `clients/<name>/`. If absent, fall back to repo-root paths for backward compatibility.
+3. **Set output paths** based on whether `--client` was provided:
+
+   | Output | With `--client <name>` | Without `--client` (legacy) |
+   |--------|------------------------|-----------------------------|
+   | Site map | `clients/<name>/research/site-map.json` | `docs/research/site-map.json` |
+   | Design system | `clients/<name>/research/design-system.json` | `docs/research/design-system.json` |
+   | Content files | `clients/<name>/research/content/` | `docs/research/content/` |
+   | Screenshots | `clients/<name>/research/screenshots/` | `docs/design-references/` |
+   | Images | `clients/<name>/assets/images/` | `public/images/` |
+   | SEO assets | `clients/<name>/assets/seo/` | `public/images/seo/` |
+   | Download script | `clients/<name>/scripts/download-assets.mjs` | `scripts/download-assets.mjs` |
+
+   Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$IMAGES`, `$SEO`, and `$SCRIPTS` as placeholders for the resolved paths.
+
+4. Create all output directories.
 
 ## Phase 1: Site Map Discovery (Output 1)
 
@@ -75,7 +87,7 @@ For each discovered URL, determine if it's a **unique page** or a **template ins
 
 ### Step 4: Output Site Map
 
-Save to `docs/research/site-map.json`:
+Save to `$RESEARCH/site-map.json`:
 
 ```json
 {
@@ -186,19 +198,19 @@ Use browser MCP to navigate to each page and run JavaScript extraction:
 
 - Homepage at 1440px, 768px, 390px
 - 1-2 other pages at 1440px
-- Save to `docs/design-references/`
+- Save to `$SCREENSHOTS/`
 
 ### Download Global Assets
 
-1. Find and download all images referenced on scraped pages to `public/images/`
-2. Download favicon, apple-touch-icon, OG images to `public/images/seo/`
+1. Find and download all images referenced on scraped pages to `$IMAGES/`
+2. Download favicon, apple-touch-icon, OG images to `$SEO/`
 3. Note any external fonts (Google Fonts URLs, self-hosted font files)
 
-Write and run a `scripts/download-assets.mjs` script for batch downloading (4 concurrent).
+Write and run a `$SCRIPTS/download-assets.mjs` script for batch downloading (4 concurrent).
 
 ### Output Design System
 
-Save to `docs/research/design-system.json`:
+Save to `$RESEARCH/design-system.json`:
 
 ```json
 {
@@ -325,7 +337,7 @@ For each page, navigate with browser MCP and extract:
 
 4. **Images:**
    - All `<img>` src URLs, alt text, and context (hero, inline, gallery, background)
-   - Download each to `public/images/`
+   - Download each to `$IMAGES/`
 
 5. **Links:**
    - Internal navigation links
@@ -348,7 +360,7 @@ For each page, navigate with browser MCP and extract:
 
 ### Output Content Files
 
-Save one file per scraped page in `docs/research/content/`:
+Save one file per scraped page in `$RESEARCH/content/`:
 
 ```json
 {
@@ -440,18 +452,18 @@ Site Map:
   • 6 unique pages discovered
   • 2 template groups (47 products, 12 blog posts)
   • 64 total pages on site
-  Saved → docs/research/site-map.json
+  Saved → $RESEARCH/site-map.json
 
 Design System:
   • Primary: #313131, Accent: #007cba
   • Fonts: Playfair Display (headings), Open Sans (body)
-  • 16 assets downloaded to public/
-  Saved → docs/research/design-system.json
+  • 16 assets downloaded to $IMAGES/
+  Saved → $RESEARCH/design-system.json
 
 Content Extracted:
   • 8 pages scraped (6 unique + 2 templates)
   • 24 images downloaded
-  Saved → docs/research/content/
+  Saved → $RESEARCH/content/
 
-Next step: Review the outputs, then run /clone-website to build the site.
+Next step: Review the outputs, then run /clone-website with the same --client flag to build the site.
 ```

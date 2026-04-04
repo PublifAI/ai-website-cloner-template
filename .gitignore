@@ -48,7 +48,10 @@ next-env.d.ts
 # Local temp files
 temp/
 
-# Cloner execution output (site-specific, generated per run)
+# Client data (generated per run, one folder per client)
+clients/
+
+# Legacy cloner output (when --client is not used)
 output/
 docs/research/site-map.json
 docs/research/design-system.json
