@@ -1,165 +1,117 @@
-# AI Website Cloner Template
+# AI Website Cloner — Publifai Fork
 
-<a href="https://github.com/JCodesMore/ai-website-cloner-template/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a> <a href="https://github.com/JCodesMore/ai-website-cloner-template/stargazers"><img src="https://img.shields.io/github/stars/JCodesMore/ai-website-cloner-template?style=flat" alt="Stars" /></a> <a href="https://discord.gg/hrTSX5yTpB"><img src="https://img.shields.io/discord/1400896964597383279?label=discord" alt="Discord" /></a>
+Fork of [JCodesMore/ai-website-cloner-template](https://github.com/JCodesMore/ai-website-cloner-template), adapted for Publifai's client onboarding pipeline.
 
-A reusable template for reverse-engineering any website into **plain HTML + Tailwind CSS** using AI coding agents. No frameworks in the output — just clean, static HTML files styled with the Tailwind standalone CLI.
+## Why We Use This
 
-**Recommended: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with Opus 4.6 for best results** — but works with a variety of AI coding agents.
+Publifai builds websites for small businesses via WhatsApp. When a client already has a website (Case 2 in our process), we need to capture their existing site's content, structure, and design before building the new one. This cloner handles **Step 0: Capture Existing Site** — the first step in our site building process.
+
+Instead of asking clients to manually provide every piece of content, we scrape their existing site and use the output to:
+- Pre-fill business info (content, images, contact details)
+- Show the client what we captured for confirmation
+- Feed the design system into our build step
+- Generate a client-facing site audit report shared via WhatsApp
+
+See [`publifai-docs/product/site-building-process.md`](https://github.com/publifai/publifai-docs) for the full onboarding flow.
+
+## How It Fits Into Publifai
+
+```
+Client shares URL on WhatsApp
+  → AI agent calls scrape_site(url)
+  → This cloner runs /discover-site
+  → Outputs: site map, design system, content extraction
+  → Agent summarizes findings, sends to client
+  → Agent generates site audit report
+  → Feeds into Steps 1-4 of site building process
+```
+
+The three outputs map directly to our process:
+
+| Output | File | Feeds into |
+|--------|------|------------|
+| Site map | `research/site-map.json` | Step 2 — agree on page structure with client |
+| Design system | `research/design-system.json` | Step 3 — agree on design direction |
+| Page content | `research/content/*.json` | Step 4 — generate the new site without re-asking for content |
 
 ## Two-Step Workflow
 
-1. **`/discover-site <url> --client <name>`** — Crawls the site structure via sitemap/navigation, extracts the design system (colors, fonts, spacing, components), and pulls content from representative pages. Produces `site-map.json`, `design-system.json`, and per-page content files.
+1. **`/discover-site <url> --client <name>`** — Crawls site structure via sitemap/navigation, extracts design system (colors, fonts, spacing), pulls content from representative pages. Produces `site-map.json`, `design-system.json`, and per-page content files.
 
-2. **`/clone-website <url> --client <name>`** — Reads the discovery output and builds pixel-perfect static HTML + Tailwind CSS pages. Inspects each section, writes component specs, and dispatches parallel builder agents to reconstruct every section.
+2. **`/clone-website <url> --client <name>`** — Reads discovery output and builds pixel-perfect static HTML + Tailwind CSS pages. Inspects each section, writes component specs, dispatches parallel builder agents.
 
-Use `--client <name>` to isolate each client's data into `clients/<name>/`. This lets you run the cloner for multiple clients without conflicts. Omit `--client` for backward-compatible repo-root output.
-
-## Demo
-
-[![Watch the demo](docs/design-references/comparison.png)](https://youtu.be/O669pVZ_qr0)
-
-> Click the image above to watch the full demo on YouTube.
+`--client <name>` isolates each client's data into `clients/<name>/`. This lets us run the cloner for multiple clients without conflicts.
 
 ## Quick Start
 
-1. **Clone this repository**
-   ```bash
-   git clone https://github.com/JCodesMore/ai-website-cloner-template.git my-clone
-   cd my-clone
-   ```
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-3. **Start your AI agent** — Claude Code recommended:
-   ```bash
-   claude --chrome
-   ```
-4. **Discover the site structure** (recommended first step):
-   ```
-   /discover-site example.com --client mysite
-   ```
-5. **Clone the site**:
-   ```
-   /clone-website https://example.com --client mysite
-   ```
-6. **Build the output CSS**:
-   ```bash
-   cd clients/mysite/output && bash build.sh
-   ```
+```bash
+# Clone (will be forked to publifai org)
+git clone https://github.com/publifai/ai-website-cloner-template.git
+cd ai-website-cloner-template
+npm install
 
-> Using a different agent? Open `AGENTS.md` for project instructions — most agents pick it up automatically.
+# Start Claude Code with browser access
+claude --chrome
 
-## Supported Platforms
+# Discover a client's existing site
+/discover-site galleryoneindia.com --client galleryoneindia
 
-| Agent                                                         | Status                     |
-| ------------------------------------------------------------- | -------------------------- |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | **Recommended** — Opus 4.6 |
-| [Codex CLI](https://github.com/openai/codex)                  | Supported                  |
-| [OpenCode](https://opencode.ai/)                              | Supported                  |
-| [GitHub Copilot](https://github.com/features/copilot)         | Supported                  |
-| [Cursor](https://cursor.com/)                                 | Supported                  |
-| [Windsurf](https://codeium.com/windsurf)                      | Supported                  |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli)     | Supported                  |
-| [Cline](https://github.com/cline/cline)                       | Supported                  |
-| [Roo Code](https://github.com/RooCodeInc/Roo-Code)            | Supported                  |
-| [Continue](https://continue.dev/)                              | Supported                  |
-| [Amazon Q](https://aws.amazon.com/q/developer/)               | Supported                  |
-| [Augment Code](https://www.augmentcode.com/)                   | Supported                  |
-| [Aider](https://aider.chat/)                                   | Supported                  |
+# Clone the site (optional — only if we want a full rebuild as starting point)
+/clone-website https://galleryoneindia.com --client galleryoneindia
 
-## Prerequisites
+# Build output CSS
+cd clients/galleryoneindia/output && bash build.sh
+```
 
-- [Node.js](https://nodejs.org/) 24+ (for the development scaffold and skill scripts)
-- An AI coding agent (see [Supported Platforms](#supported-platforms))
-- Browser automation MCP tool (Chrome MCP recommended) for site inspection
+## Client Output Structure
 
-## Output Format
+```
+clients/<name>/
+├── research/
+│   ├── site-map.json             # Full site structure + template categorization
+│   ├── design-system.json        # Colors, fonts, spacing, component patterns
+│   ├── screenshots/              # Page screenshots from recon
+│   ├── content/                  # Per-page content JSON
+│   └── components/               # Section spec files
+├── assets/
+│   ├── images/                   # Downloaded from source site
+│   ├── videos/
+│   └── seo/                      # Favicon, OG images
+├── scripts/                      # Download scripts for this client
+└── output/                       # Generated HTML+Tailwind site
+    ├── index.html
+    ├── about.html
+    ├── css/
+    ├── js/
+    ├── images/
+    ├── tailwind.config.js
+    └── build.sh
+```
 
-The cloner produces **plain HTML + Tailwind CSS** — no React, no Next.js, no Node.js required for the final output:
-
-- Standalone `.html` files (one per unique page, one per template type)
-- Tailwind CSS via [standalone CLI](https://tailwindcss.com/blog/standalone-cli) — no npm needed
-- Minimal vanilla JS only where interactivity is required (carousels, dropdowns, etc.)
-- All images, fonts, and assets downloaded locally
-- Template pages use `<!-- VARIABLE: field_name -->` comment markers for fields that change per instance
-
-## How It Works
-
-### Phase 1: Discovery (`/discover-site`)
-
-1. **Sitemap crawl** — fetches `sitemap.xml` / `sitemap_index.xml`, falls back to navigation crawling
-2. **Page categorization** — groups URLs into unique pages vs template instances based on URL patterns
-3. **Design system extraction** — colors, typography, spacing, components, decorative patterns from computed styles
-4. **Content extraction** — scrapes representative pages (all unique + one per template group, max ~10 total)
-5. **Template field marking** — identifies which fields are variable (change per instance) vs fixed (same on every instance)
-
-### Phase 2: Cloning (`/clone-website`)
-
-1. **Reconnaissance** — screenshots, interaction sweep (scroll, click, hover, responsive)
-2. **Foundation** — updates fonts, colors, globals, downloads all assets
-3. **Component specs** — writes detailed spec files with exact computed CSS values, states, behaviors, and content
-4. **Parallel build** — dispatches builder agents in git worktrees, one per section/component
-5. **Assembly & QA** — merges worktrees, wires up pages, runs visual diff against the original
-
-### Smart Scraping
-
-The discovery phase is designed to handle sites of any size efficiently:
+## Smart Scraping Rules
 
 - **Never scrapes more than ~10 pages** regardless of site size
 - All unique pages get scraped (typically 4-6)
 - One representative page per template group (typically 1-3)
-- Skips authentication-required pages, pagination, search results, and feeds
-- A 500-page WooCommerce site with 200 products? That's ~6 unique pages + 3-4 template types = ~10 pages scraped
+- Skips authentication-required pages, pagination, search results
+- A 500-page site with 200 products = ~6 unique pages + 3-4 template types = ~10 pages scraped
 
-## Use Cases
+## Output Format
 
-- **Platform migration** — rebuild a site you own from WordPress/Webflow/Squarespace into clean static HTML
-- **Lost source code** — your site is live but the repo is gone, the developer left, or the stack is legacy
-- **Learning** — deconstruct how production sites achieve specific layouts, animations, and responsive behavior
-- **Client onboarding** — quickly replicate a client's existing site as a starting point for a redesign
+Plain HTML + Tailwind CSS — no React, no Next.js, no Node.js in the final output:
+- Standalone `.html` files (one per unique page, one per template type)
+- Tailwind CSS via [standalone CLI](https://tailwindcss.com/blog/standalone-cli)
+- Minimal vanilla JS only where interactivity is needed
+- All images, fonts, and assets downloaded locally
+- Template pages use `<!-- VARIABLE: field_name -->` markers for per-instance fields
 
-## Not Intended For
+This matches Publifai's stack: plain HTML + Tailwind CSS, compiled with standalone CLI on the Mac Mini, deployed via `wrangler pages deploy` to Cloudflare Pages.
 
-- **Phishing or impersonation** — this project must not be used for deceptive purposes, impersonation, or any activity that breaks the law.
-- **Passing off someone's design as your own** — logos, brand assets, and original copy belong to their owners.
-- **Violating terms of service** — some sites explicitly prohibit scraping or reproduction. Check first.
+## Prerequisites
 
-## Project Structure
-
-```
-clients/                       # Client data (gitignored)
-  <name>/                      # One folder per client
-    research/                  # Discovery + extraction output
-      site-map.json
-      design-system.json
-      screenshots/
-      content/
-      components/
-    assets/                    # Downloaded from source site
-      images/
-      videos/
-      seo/
-    scripts/                   # Client-specific download scripts
-    output/                    # Generated HTML+Tailwind site
-      index.html
-      about.html
-      css/
-      js/
-      images/
-      tailwind.config.js
-      build.sh
-src/                           # Development scaffold (Next.js)
-  app/                         # Next.js routes
-  components/                  # React components
-    ui/                        # shadcn/ui primitives
-  lib/utils.ts                 # cn() utility
-scripts/
-  sync-agent-rules.sh         # Regenerate agent instruction files
-  sync-skills.mjs             # Regenerate skills for all platforms
-AGENTS.md                     # Agent instructions (single source of truth)
-CLAUDE.md                     # Claude Code config (imports AGENTS.md)
-```
+- [Node.js](https://nodejs.org/) 24+
+- An AI coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code) with Opus 4.6 recommended)
+- Browser automation MCP tool (Chrome MCP recommended)
 
 ## Commands
 
@@ -171,33 +123,18 @@ npm run lint       # ESLint check
 npm run typecheck  # TypeScript check
 npm run check      # Run lint + typecheck + build
 
-# Output site (replace <name> with your client name)
+# Output site
 cd clients/<name>/output && bash build.sh   # Build Tailwind CSS for output site
 ```
 
-### If using Docker
+## Keeping in Sync with Upstream
 
 ```bash
-docker compose up app --build  # Build and run the app
-docker compose up dev --build  # Run the app in dev mode on port 3001
+git fetch upstream
+git merge upstream/main
+# Resolve any conflicts with our modifications
 ```
-
-## Updating for Other Platforms
-
-Three source-of-truth files power all platform support. Edit the source, then run the sync script:
-
-| What                   | Source of truth                         | Sync command                       |
-| ---------------------- | --------------------------------------- | ---------------------------------- |
-| Project instructions   | `AGENTS.md`                             | `bash scripts/sync-agent-rules.sh` |
-| `/discover-site` skill | `.claude/skills/discover-site/SKILL.md` | `node scripts/sync-skills.mjs`     |
-| `/clone-website` skill | `.claude/skills/clone-website/SKILL.md` | `node scripts/sync-skills.mjs`     |
-
-Each script regenerates the platform-specific copies automatically. Agents that read the source files natively need no regeneration.
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=JCodesMore/ai-website-cloner-template&type=Date)](https://star-history.com/#JCodesMore/ai-website-cloner-template&Date)
 
 ## License
 
-MIT
+MIT — see upstream repo for full license.
