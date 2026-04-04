@@ -16,17 +16,63 @@ This skill produces FOUR outputs that feed into the site-building process:
 
 1. **Browser automation is required.** Check for available browser MCP tools (Chrome MCP, Playwright MCP, Browserbase MCP, Puppeteer MCP, etc.). Use whichever is available — if multiple exist, prefer Chrome MCP. If none are detected, ask the user which browser tool they have and how to connect it.
 2. **Parse arguments from `the target URL provided by the user`:**
-   - Extract the base URL (first non-flag argument). Normalize it (add `https://` if missing, strip trailing paths to get the domain root). Verify the site is accessible.
+   - Extract the base URL (first non-flag argument). Normalize it (add `https://` if missing, strip trailing paths to get the domain root).
    - Check for `--client <name>` flag. If present, all output goes into a client-specific folder. If absent, fall back to repo-root paths for backward compatibility.
    - Check for `--phases <list>` flag. If present, parse the comma-separated list of phase numbers (e.g., `--phases 1,2` or `--phases 3,4`). Only run the listed phases. If absent, run all 4 phases.
      - Valid phase numbers: `1` (Site Map), `2` (Design System), `3` (Site Audit Report), `4` (Content Extraction).
      - **Phase dependencies:** Phase 3 (audit report) reads outputs from Phases 1 and 2. If running Phase 3 without 1 or 2, check that the required files (`site-map.json`, `design-system.json`) already exist from a previous run. If missing, warn the user and skip Phase 3.
      - Phase 4 (content extraction) reads the site map from Phase 1. If running Phase 4 without 1, check that `site-map.json` exists. If missing, warn the user and skip Phase 4.
+   - Check for `--force` flag. If present, re-run phases even if client.json shows them as completed.
 3. **Resolve the clients directory:**
    - Read `.env` file in the repo root for `CLIENTS_DIR`. Default: `../clients` (parent-level, shared across all Publifai tools).
    - Resolve the path relative to the repo root to get an absolute path. Store as `$CLIENTS_DIR`.
    - Example: if repo is at `/Users/me/repos/publifai/ai-website-cloner-template` and `CLIENTS_DIR=../clients`, then `$CLIENTS_DIR` = `/Users/me/repos/publifai/clients`.
-4. **Set output paths** based on whether `--client` was provided:
+4. **Read client.json** (if `--client` was provided):
+   - Check if `$CLIENTS_DIR/<name>/client.json` exists.
+   - **If it exists**, read it and use:
+     - `existing_site.url` as the target URL if no URL was provided as an argument
+     - `business.name` as the business name for the audit report (instead of guessing from the site)
+     - `case` to understand the client scenario (1, 2a, 2b, 2c)
+     - `steps.discovery.phases` to check which phases are already completed — skip completed phases unless `--force` is passed
+     - `design` fields if already populated (e.g., client has already approved colors)
+   - **If it doesn't exist**, create it with defaults:
+     ```json
+     {
+       "name": "<title-cased domain>",
+       "slug": "<domain without TLD>",
+       "owner": { "name": null, "phone": null, "email": null },
+       "business": { "type": null, "description": null, "location": null, "services": [], "hours": null, "socials": {} },
+       "case": "2b",
+       "status": "discovery",
+       "steps": {
+         "discovery": {
+           "started": "<today>",
+           "completed": null,
+           "phases": {
+             "site_map": { "status": "pending", "completed": null },
+             "design_system": { "status": "pending", "completed": null },
+             "audit_report": { "status": "pending", "completed": null, "report_shared": null },
+             "content_extraction": { "status": "pending", "completed": null }
+           }
+         },
+         "info_gathering": { "started": null, "completed": null },
+         "structure_review": { "started": null, "approved": null },
+         "design_review": { "started": null, "approved": null },
+         "build": { "started": null, "completed": null },
+         "preview": { "started": null, "iterations": 0 },
+         "live": { "launched": null }
+       },
+       "domains": { "subdomain": "<slug>.publif.ai", "custom": "<domain>", "custom_active": false },
+       "existing_site": { "url": "https://<domain>", "scraped": false, "pages_discovered": null, "pages_scraped": null },
+       "design": { "colors": {}, "fonts": {}, "vibe": null },
+       "structure": { "pages": [] },
+       "notes": [],
+       "created": "<today>",
+       "updated": "<today>"
+     }
+     ```
+   - Verify the site is accessible (using the URL from client.json or the argument).
+5. **Set output paths** based on whether `--client` was provided:
 
    | Output | With `--client <name>` | Without `--client` (legacy) |
    |--------|------------------------|-----------------------------|
@@ -42,7 +88,30 @@ This skill produces FOUR outputs that feed into the site-building process:
 
    Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$IMAGES`, `$SEO`, `$SCRIPTS`, and `$REPORT` as placeholders for the resolved paths.
 
-5. Create all output directories.
+6. Create all output directories.
+
+### Updating client.json at Phase Boundaries
+
+**When `--client` is provided**, update `$CLIENTS_DIR/<name>/client.json` at each phase boundary. Use a read-modify-write pattern — never overwrite fields that aren't being updated.
+
+**When a phase starts:** Set its status to `"running"`.
+
+**When a phase completes,** update the following fields (merge, don't replace):
+
+| Phase completes | Fields to set |
+|-----------------|---------------|
+| Phase 1 (Site Map) | `steps.discovery.phases.site_map.status` = `"completed"`, `.completed` = today, `existing_site.pages_discovered` = total count, `existing_site.pages_scraped` = pages_to_scrape, `existing_site.scraped` = `true`, `status` = `"discovery"` (if not already set), `steps.discovery.started` = today (if not already set) |
+| Phase 2 (Design System) | `steps.discovery.phases.design_system.status` = `"completed"`, `.completed` = today, `design.colors` = `{primary, secondary, accent}` from design-system.json, `design.fonts` = `{heading, body}` from design-system.json |
+| Phase 3 (Audit Report) | `steps.discovery.phases.audit_report.status` = `"completed"`, `.completed` = today |
+| Phase 4 (Content Extraction) | `steps.discovery.phases.content_extraction.status` = `"completed"`, `.completed` = today |
+
+**When ALL requested phases are done:**
+- Set `updated` = today
+- If all 4 phases are now `"completed"`, set `steps.discovery.completed` = today
+
+**When a phase is skipped** (via `--phases` flag): leave its status as-is.
+
+**Always** set `updated` = today on any write.
 
 ## Phase 1: Site Map Discovery (Output 1)
 

@@ -82,7 +82,19 @@ If the user provides additional instructions (specific fidelity level, customiza
 3. **Resolve the clients directory:**
    - Read `.env` file in the repo root for `CLIENTS_DIR`. Default: `../clients` (parent-level, shared across all Publifai tools).
    - Resolve the path relative to the repo root to get an absolute path. Store as `$CLIENTS_DIR`.
-4. **Set output paths** based on whether `--client` was provided:
+4. **Read client.json** (if `--client` was provided):
+   - Check if `$CLIENTS_DIR/<name>/client.json` exists.
+   - **If it exists**, read it and use:
+     - `existing_site.url` as the target URL if no URL was provided as an argument
+     - `case` to understand what kind of build this is (2a = fresh from scratch, 2b = migration with improvements, 2c = same structure new design)
+     - `design` fields if populated (client-approved colors/fonts override what was extracted)
+     - `structure.pages` if populated (client-approved page list)
+   - **If it doesn't exist and `--client` was provided**, create it with defaults (same schema as `/discover-site` — see that skill for the template). Set `status` = `"build"` and `steps.build.started` = today.
+   - When the clone **starts**, update client.json:
+     - Set `status` = `"build"`
+     - Set `steps.build.started` = today (if not already set)
+     - Set `updated` = today
+5. **Set output paths** based on whether `--client` was provided:
 
    | Output | With `--client <name>` | Without `--client` (legacy) |
    |--------|------------------------|-----------------------------|
@@ -460,6 +472,16 @@ Before dispatching ANY builder agent:
 - **Don't skip responsive extraction** — test at 1440, 768, and 390
 
 ## Completion
+
+### Update client.json
+
+If `--client` was provided, update `$CLIENTS_DIR/<name>/client.json` (read-modify-write, merge don't replace):
+
+- Set `steps.build.completed` = today
+- Set `structure.pages` = list of page names built (e.g., `["Home", "About", "Contact", "Artist Profile", "Product Page"]`)
+- Set `updated` = today
+
+### Report
 
 When done, report:
 - Total pages built (HTML files)
