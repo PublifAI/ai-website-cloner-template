@@ -30,15 +30,25 @@ The cloner outputs **plain HTML + Tailwind CSS** (no frameworks):
 - **Styling:** Tailwind CSS v4
 - **Output:** Plain HTML + Tailwind CSS (standalone CLI)
 
-## Client Output Structure (with `--client`)
+## Client Output Directory
+
+Client data lives **outside this repo**, in a shared `clients/` directory configured via `.env`:
+
+```env
+# .env (copy from .env.example)
+CLIENTS_DIR=../clients    # Default: parent-level, shared across all Publifai tools
 ```
-clients/<name>/
+
+```
+$CLIENTS_DIR/<name>/
 ├── research/
 │   ├── site-map.json             # Full site structure
 │   ├── design-system.json        # Colors, fonts, spacing
 │   ├── screenshots/              # Page screenshots from recon
 │   ├── content/                  # Per-page content JSON
 │   └── components/               # Section spec files
+├── report/
+│   └── site-audit.md             # Client-facing audit report
 ├── assets/
 │   ├── images/                   # Downloaded from source site
 │   ├── videos/

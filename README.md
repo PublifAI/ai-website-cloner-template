@@ -40,15 +40,19 @@ The three outputs map directly to our process:
 
 2. **`/clone-website <url> --client <name>`** — Reads discovery output and builds pixel-perfect static HTML + Tailwind CSS pages. Inspects each section, writes component specs, dispatches parallel builder agents.
 
-`--client <name>` isolates each client's data into `clients/<name>/`. This lets us run the cloner for multiple clients without conflicts.
+`--client <name>` isolates each client's data into a shared clients directory (configured via `.env`). This lets us run the cloner for multiple clients without conflicts, and the output is accessible to other Publifai tools.
 
 ## Quick Start
 
 ```bash
-# Clone (will be forked to publifai org)
+# Clone
 git clone https://github.com/publifai/ai-website-cloner-template.git
 cd ai-website-cloner-template
 npm install
+
+# Configure clients directory (defaults to ../clients)
+cp .env.example .env
+# Edit .env if you need a different path
 
 # Start Claude Code with browser access
 claude --chrome
@@ -58,21 +62,29 @@ claude --chrome
 
 # Clone the site (optional — only if we want a full rebuild as starting point)
 /clone-website https://galleryoneindia.com --client galleryoneindia
+```
 
-# Build output CSS
-cd clients/galleryoneindia/output && bash build.sh
+## Configuration
+
+Client data is stored **outside this repo** in a shared directory. Set the path in `.env`:
+
+```env
+# Default: ../clients (parent-level, shared across all Publifai tools)
+CLIENTS_DIR=../clients
 ```
 
 ## Client Output Structure
 
 ```
-clients/<name>/
+$CLIENTS_DIR/<name>/
 ├── research/
 │   ├── site-map.json             # Full site structure + template categorization
 │   ├── design-system.json        # Colors, fonts, spacing, component patterns
 │   ├── screenshots/              # Page screenshots from recon
 │   ├── content/                  # Per-page content JSON
 │   └── components/               # Section spec files
+├── report/
+│   └── site-audit.md             # Client-facing audit report
 ├── assets/
 │   ├── images/                   # Downloaded from source site
 │   ├── videos/
@@ -123,8 +135,8 @@ npm run lint       # ESLint check
 npm run typecheck  # TypeScript check
 npm run check      # Run lint + typecheck + build
 
-# Output site
-cd clients/<name>/output && bash build.sh   # Build Tailwind CSS for output site
+# Output site (path depends on CLIENTS_DIR in .env)
+cd ../clients/<name>/output && bash build.sh   # Build Tailwind CSS for output site
 ```
 
 ## Keeping in Sync with Upstream

@@ -9,32 +9,38 @@ description: "Discover a website's full structure via sitemap/navigation crawlin
 
 You are about to discover and document the full structure of a website.
 
-This skill produces THREE outputs that feed into the site-building process:
+This skill produces FOUR outputs that feed into the site-building process:
 1. **Site map** — every page categorized as unique or template instance
 2. **Design system** — colors, fonts, spacing, component patterns
-3. **Content extraction** — text, images, and structure from representative pages
+3. **Site audit report** — client-facing summary of findings and recommendations
+4. **Content extraction** — text, images, and structure from representative pages
 
 ## Pre-Flight
 
 1. **Browser automation is required.** Check for available browser MCP tools (Chrome MCP, Playwright MCP, Browserbase MCP, Puppeteer MCP, etc.). Use whichever is available — if multiple exist, prefer Chrome MCP. If none are detected, ask the user which browser tool they have and how to connect it.
 2. **Parse arguments from `$ARGUMENTS`:**
    - Extract the base URL (first non-flag argument). Normalize it (add `https://` if missing, strip trailing paths to get the domain root). Verify the site is accessible.
-   - Check for `--client <name>` flag. If present, all output goes into `clients/<name>/`. If absent, fall back to repo-root paths for backward compatibility.
-3. **Set output paths** based on whether `--client` was provided:
+   - Check for `--client <name>` flag. If present, all output goes into a client-specific folder. If absent, fall back to repo-root paths for backward compatibility.
+3. **Resolve the clients directory:**
+   - Read `.env` file in the repo root for `CLIENTS_DIR`. Default: `../clients` (parent-level, shared across all Publifai tools).
+   - Resolve the path relative to the repo root to get an absolute path. Store as `$CLIENTS_DIR`.
+   - Example: if repo is at `/Users/me/repos/publifai/ai-website-cloner-template` and `CLIENTS_DIR=../clients`, then `$CLIENTS_DIR` = `/Users/me/repos/publifai/clients`.
+4. **Set output paths** based on whether `--client` was provided:
 
    | Output | With `--client <name>` | Without `--client` (legacy) |
    |--------|------------------------|-----------------------------|
-   | Site map | `clients/<name>/research/site-map.json` | `docs/research/site-map.json` |
-   | Design system | `clients/<name>/research/design-system.json` | `docs/research/design-system.json` |
-   | Content files | `clients/<name>/research/content/` | `docs/research/content/` |
-   | Screenshots | `clients/<name>/research/screenshots/` | `docs/design-references/` |
-   | Images | `clients/<name>/assets/images/` | `public/images/` |
-   | SEO assets | `clients/<name>/assets/seo/` | `public/images/seo/` |
-   | Download script | `clients/<name>/scripts/download-assets.mjs` | `scripts/download-assets.mjs` |
+   | Site map | `$CLIENTS_DIR/<name>/research/site-map.json` | `docs/research/site-map.json` |
+   | Design system | `$CLIENTS_DIR/<name>/research/design-system.json` | `docs/research/design-system.json` |
+   | Content files | `$CLIENTS_DIR/<name>/research/content/` | `docs/research/content/` |
+   | Screenshots | `$CLIENTS_DIR/<name>/research/screenshots/` | `docs/design-references/` |
+   | Images | `$CLIENTS_DIR/<name>/assets/images/` | `public/images/` |
+   | SEO assets | `$CLIENTS_DIR/<name>/assets/seo/` | `public/images/seo/` |
+   | Download script | `$CLIENTS_DIR/<name>/scripts/download-assets.mjs` | `scripts/download-assets.mjs` |
+   | Audit report | `$CLIENTS_DIR/<name>/report/site-audit.md` | `docs/research/site-audit.md` |
 
-   Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$IMAGES`, `$SEO`, and `$SCRIPTS` as placeholders for the resolved paths.
+   Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$IMAGES`, `$SEO`, `$SCRIPTS`, and `$REPORT` as placeholders for the resolved paths.
 
-4. Create all output directories.
+5. Create all output directories.
 
 ## Phase 1: Site Map Discovery (Output 1)
 
@@ -303,7 +309,114 @@ Save to `$RESEARCH/design-system.json`:
 }
 ```
 
-## Phase 3: Content Extraction (Output 3)
+## Phase 3: Site Audit Report (Output 3)
+
+Goal: Generate a client-facing audit report that summarizes everything discovered in Phases 1 and 2. This report is written for a non-technical small business owner — no jargon, friendly professional tone.
+
+### Determine the Business Name
+
+Look for the business name in this order:
+1. The site's `<title>` tag or OG title (strip suffixes like "| Home", "— Official Site")
+2. The logo alt text
+3. The domain name, title-cased (e.g., "galleryoneindia.com" → "Gallery One India")
+
+Use this business name throughout the report.
+
+### Gather Data
+
+Read the outputs from Phase 1 and Phase 2:
+- `$RESEARCH/site-map.json` — page counts, unique pages, template groups
+- `$RESEARCH/design-system.json` — colors, fonts, layout, components
+- Screenshots from `$SCREENSHOTS/` — reference 2-3 in the report if available
+
+Also capture during Phase 2 (or now via browser MCP if not already done):
+- **Mobile experience** — check the site at 390px viewport width. Note: is it responsive? Any issues with text size, button spacing, horizontal scroll, image scaling?
+- **SEO basics** — check each scraped page for: unique `<title>`, meta description, OG tags, alt text on images, JSON-LD structured data, sitemap.xml presence
+- **Performance indicators** — note obvious issues: very large images (>500KB), render-blocking scripts, excessive HTTP requests. If Lighthouse scores were captured, include the performance score.
+
+### Write the Report
+
+Save to `$REPORT/site-audit.md`. Follow this exact structure:
+
+```markdown
+# [Business Name] — Website Review
+
+## Your Current Site at a Glance
+
+[2-3 sentences: how many pages, what the site covers, overall impression. Lead with what's working well before mentioning any issues.]
+
+## What We Found
+
+### Pages & Structure
+- [List each unique page with a one-line description]
+- [Note template groups in plain language, e.g., "6 main pages + 47 individual artist profiles"]
+- [Flag any pages that seem outdated, empty, or redundant — frame as opportunity, not criticism]
+
+### Design & Branding
+
+**Your Color Palette:**
+- [Color Name] `#hexcode`
+- [Color Name] `#hexcode`
+- [repeat for each major color]
+
+**Fonts:** [heading font] for headings, [body font] for text
+
+**Overall Style:** [Plain-language description — "clean and modern", "traditional with rich colors", etc.]
+
+**What's working well:** [1-2 positive observations]
+
+**What could be improved:** [1-2 suggestions, framed constructively]
+
+### Mobile Experience
+- [Is it responsive? How does it look on phones?]
+- [Specific issues if any — text too small, buttons too close together, horizontal scrolling, images not scaling]
+- [If it works well on mobile, say so]
+
+### Speed & Performance
+- [Page load impression — fast, moderate, slow]
+- [Major issues if any — large uncompressed images, heavy scripts, etc.]
+- [Keep this non-technical — "Your homepage loads about X large images that could be optimized" not "render-blocking CSS in the critical path"]
+
+### SEO Basics
+- [Does each page have a unique title and description?]
+- [Are images using descriptive alt text?]
+- [Is there a sitemap.xml?]
+- [Any missing social sharing tags?]
+- [Frame gaps as easy wins, not failures]
+
+[If screenshots are available, include 2-3 as image references:]
+![Homepage on desktop]($SCREENSHOTS/homepage-desktop.png)
+![Homepage on mobile]($SCREENSHOTS/homepage-mobile.png)
+
+## Our Recommendation
+
+[A short paragraph with your suggested approach based on what you found. Reference these 3 options:]
+
+- **Option A: Fresh start** — New design, new structure, built from scratch for speed and mobile
+- **Option B: Faithful rebuild** — Keep your current look and page structure, rebuilt with modern technology for better speed and mobile experience
+- **Option C: Same structure, new look** — Keep your pages as they are, but with a fresh modern design
+
+[End with:] Which direction feels right to you? Or we can mix and match — happy to discuss.
+
+## What Happens Next
+
+1. We'll agree on the page structure together
+2. Then lock in the design direction — colors, style, feel
+3. I'll build your site and send you a preview link
+4. You tell me what to change — as many rounds as you need
+5. When you're happy, we go live
+```
+
+### Report Guidelines
+
+- **Length:** Keep it to 1-2 pages when printed. Be concise.
+- **Tone:** Friendly consultant, not a technical scanner. Write as if you're explaining findings to the business owner over coffee.
+- **Framing:** "Here's what we can improve" not "here's what's wrong." Lead each section with positives.
+- **No jargon:** Don't use terms like "render-blocking," "DOM," "viewport," "CDN." Translate everything into plain language.
+- **Screenshots:** Reference 2-3 screenshots from `$SCREENSHOTS/` as markdown image links. Pick the most useful ones (homepage desktop, homepage mobile, one interior page).
+- **Color palette:** List colors with friendly names and hex codes (e.g., "Dark Charcoal `#313131`", "Ocean Blue `#007cba`").
+
+## Phase 4: Content Extraction (Output 4)
 
 Goal: Extract content from representative pages ONLY.
 
@@ -442,7 +555,7 @@ These are hard limits — never violate them:
 
 ## Completion
 
-When all 3 phases are done, print a summary:
+When all 4 phases are done, print a summary:
 
 ```
 Site Discovery Complete: example.com
@@ -460,10 +573,14 @@ Design System:
   • 16 assets downloaded to $IMAGES/
   Saved → $RESEARCH/design-system.json
 
+Site Audit Report:
+  • Client-facing website review generated
+  Saved → $REPORT/site-audit.md
+
 Content Extracted:
   • 8 pages scraped (6 unique + 2 templates)
   • 24 images downloaded
   Saved → $RESEARCH/content/
 
-Next step: Review the outputs, then run /clone-website with the same --client flag to build the site.
+Next step: Share the audit report with the client, then run /clone-website with the same --client flag to build the site.
 ```

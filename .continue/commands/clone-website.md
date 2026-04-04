@@ -19,10 +19,10 @@ This is not a two-phase process (inspect then build). You are a **foreman walkin
 
 **This is NOT a Next.js/React project.** The output is standalone static HTML files.
 
-When `--client <name>` is provided, everything goes into `clients/<name>/`. When omitted, falls back to repo-root paths for backward compatibility.
+When `--client <name>` is provided, everything goes into a client-specific folder outside the repo (configured via `CLIENTS_DIR` in `.env`). When omitted, falls back to repo-root paths for backward compatibility.
 
 ```
-clients/<name>/                   # With --client (recommended)
+$CLIENTS_DIR/<name>/              # With --client (recommended)
 ├── research/                     # Discovery + extraction artifacts
 │   ├── site-map.json
 │   ├── design-system.json
@@ -79,22 +79,25 @@ If the user provides additional instructions (specific fidelity level, customiza
 1. **Browser automation is required.** Check for available browser MCP tools (Chrome MCP, Playwright MCP, Browserbase MCP, Puppeteer MCP, etc.). Use whichever is available — if multiple exist, prefer Chrome MCP. If none are detected, ask the user which browser tool they have and how to connect it. This skill cannot work without browser automation.
 2. **Parse arguments from `$ARGUMENTS`:**
    - Extract URL(s) (non-flag arguments). Normalize and validate each URL.
-   - Check for `--client <name>` flag. If present, all output goes into `clients/<name>/`. If absent, fall back to repo-root paths for backward compatibility.
-3. **Set output paths** based on whether `--client` was provided:
+   - Check for `--client <name>` flag. If present, all output goes into a client-specific folder. If absent, fall back to repo-root paths for backward compatibility.
+3. **Resolve the clients directory:**
+   - Read `.env` file in the repo root for `CLIENTS_DIR`. Default: `../clients` (parent-level, shared across all Publifai tools).
+   - Resolve the path relative to the repo root to get an absolute path. Store as `$CLIENTS_DIR`.
+4. **Set output paths** based on whether `--client` was provided:
 
    | Output | With `--client <name>` | Without `--client` (legacy) |
    |--------|------------------------|-----------------------------|
-   | Research/specs | `clients/<name>/research/` | `docs/research/` |
-   | Screenshots | `clients/<name>/research/screenshots/` | `$SCREENSHOTS/` |
-   | Component specs | `clients/<name>/research/components/` | `$COMPONENTS/` |
-   | Assets (images) | `clients/<name>/assets/images/` | `public/images/` |
-   | SEO assets | `clients/<name>/assets/seo/` | `public/images/seo/` |
-   | HTML output | `clients/<name>/output/` | `output/` |
-   | Download scripts | `clients/<name>/scripts/` | `scripts/` |
+   | Research/specs | `$CLIENTS_DIR/<name>/research/` | `docs/research/` |
+   | Screenshots | `$CLIENTS_DIR/<name>/research/screenshots/` | `docs/design-references/` |
+   | Component specs | `$CLIENTS_DIR/<name>/research/components/` | `docs/research/components/` |
+   | Assets (images) | `$CLIENTS_DIR/<name>/assets/images/` | `public/images/` |
+   | SEO assets | `$CLIENTS_DIR/<name>/assets/seo/` | `public/images/seo/` |
+   | HTML output | `$CLIENTS_DIR/<name>/output/` | `output/` |
+   | Download scripts | `$CLIENTS_DIR/<name>/scripts/` | `scripts/` |
 
    Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$COMPONENTS`, `$IMAGES`, `$SEO`, `$OUTPUT`, and `$SCRIPTS` as placeholders for the resolved paths.
 
-4. **Check for discovery output.** If `$RESEARCH/site-map.json` exists (from running `/discover-site`), read it and use it to determine which pages to clone. If `$RESEARCH/design-system.json` exists, use it for design tokens. If `$RESEARCH/content/` has files, use them for page content. This avoids re-scraping what was already discovered.
+6. **Check for discovery output.** If `$RESEARCH/site-map.json` exists (from running `/discover-site`), read it and use it to determine which pages to clone. If `$RESEARCH/design-system.json` exists, use it for design tokens. If `$RESEARCH/content/` has files, use them for page content. This avoids re-scraping what was already discovered.
 5. Create all output directories.
 6. When working with multiple pages, optionally confirm whether to run them in parallel (recommended) or sequentially.
 
