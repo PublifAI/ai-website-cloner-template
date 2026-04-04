@@ -36,11 +36,38 @@ The three outputs map directly to our process:
 
 ## Two-Step Workflow
 
-1. **`/discover-site <url> --client <name>`** — Crawls site structure via sitemap/navigation, extracts design system (colors, fonts, spacing), pulls content from representative pages. Produces `site-map.json`, `design-system.json`, and per-page content files.
+1. **`/discover-site <url> --client <name>`** — Crawls site structure via sitemap/navigation, extracts design system (colors, fonts, spacing), pulls content from representative pages. Produces `site-map.json`, `design-system.json`, audit report, and per-page content files.
 
 2. **`/clone-website <url> --client <name>`** — Reads discovery output and builds pixel-perfect static HTML + Tailwind CSS pages. Inspects each section, writes component specs, dispatches parallel builder agents.
 
 `--client <name>` isolates each client's data into a shared clients directory (configured via `.env`). This lets us run the cloner for multiple clients without conflicts, and the output is accessible to other Publifai tools.
+
+### Running specific discovery phases
+
+`/discover-site` has 4 phases that can be run selectively with `--phases`:
+
+| Phase | Output | Description |
+|-------|--------|-------------|
+| 1 | `site-map.json` | Sitemap/navigation crawl, page categorization |
+| 2 | `design-system.json` | Colors, fonts, spacing, screenshots, asset download |
+| 3 | `site-audit.md` | Client-facing audit report (requires phases 1+2 output) |
+| 4 | `content/*.json` | Per-page content extraction (requires phase 1 output) |
+
+```bash
+# Run only site map discovery
+/discover-site galleryoneindia.com --client galleryoneindia --phases 1
+
+# Run site map + design system
+/discover-site galleryoneindia.com --client galleryoneindia --phases 1,2
+
+# Generate audit report later (phases 1+2 must have run previously)
+/discover-site galleryoneindia.com --client galleryoneindia --phases 3
+
+# Run all phases (default — same as omitting --phases)
+/discover-site galleryoneindia.com --client galleryoneindia
+```
+
+Phases 3 and 4 depend on earlier outputs. If the required files don't exist, the phase is skipped with a warning.
 
 ## Quick Start
 

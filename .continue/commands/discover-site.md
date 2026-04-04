@@ -23,6 +23,10 @@ This skill produces FOUR outputs that feed into the site-building process:
 2. **Parse arguments from `$ARGUMENTS`:**
    - Extract the base URL (first non-flag argument). Normalize it (add `https://` if missing, strip trailing paths to get the domain root). Verify the site is accessible.
    - Check for `--client <name>` flag. If present, all output goes into a client-specific folder. If absent, fall back to repo-root paths for backward compatibility.
+   - Check for `--phases <list>` flag. If present, parse the comma-separated list of phase numbers (e.g., `--phases 1,2` or `--phases 3,4`). Only run the listed phases. If absent, run all 4 phases.
+     - Valid phase numbers: `1` (Site Map), `2` (Design System), `3` (Site Audit Report), `4` (Content Extraction).
+     - **Phase dependencies:** Phase 3 (audit report) reads outputs from Phases 1 and 2. If running Phase 3 without 1 or 2, check that the required files (`site-map.json`, `design-system.json`) already exist from a previous run. If missing, warn the user and skip Phase 3.
+     - Phase 4 (content extraction) reads the site map from Phase 1. If running Phase 4 without 1, check that `site-map.json` exists. If missing, warn the user and skip Phase 4.
 3. **Resolve the clients directory:**
    - Read `.env` file in the repo root for `CLIENTS_DIR`. Default: `../clients` (parent-level, shared across all Publifai tools).
    - Resolve the path relative to the repo root to get an absolute path. Store as `$CLIENTS_DIR`.
@@ -38,13 +42,16 @@ This skill produces FOUR outputs that feed into the site-building process:
    | Images | `$CLIENTS_DIR/<name>/assets/images/` | `public/images/` |
    | SEO assets | `$CLIENTS_DIR/<name>/assets/seo/` | `public/images/seo/` |
    | Download script | `$CLIENTS_DIR/<name>/scripts/download-assets.mjs` | `scripts/download-assets.mjs` |
-   | Audit report | `$CLIENTS_DIR/<name>/report/site-audit.md` | `docs/research/site-audit.md` |
+   | Audit report (HTML) | `$CLIENTS_DIR/<name>/report/site-audit.html` | `docs/research/site-audit.html` |
+   | Audit report (PDF) | `$CLIENTS_DIR/<name>/report/site-audit.pdf` | `docs/research/site-audit.pdf` |
 
    Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$IMAGES`, `$SEO`, `$SCRIPTS`, and `$REPORT` as placeholders for the resolved paths.
 
 5. Create all output directories.
 
 ## Phase 1: Site Map Discovery (Output 1)
+
+**Skip this phase if `--phases` was provided and `1` is not in the list.**
 
 Goal: Discover ALL pages on the site and categorize them.
 
@@ -146,6 +153,8 @@ Save to `$RESEARCH/site-map.json`:
 
 ## Phase 2: Design System Extraction (Output 2)
 
+**Skip this phase if `--phases` was provided and `2` is not in the list.**
+
 Goal: Extract the visual design language from 2-3 key pages.
 
 ### Pages to Inspect
@@ -156,14 +165,38 @@ Goal: Extract the visual design language from 2-3 key pages.
 
 ### What to Extract
 
-Use browser MCP to navigate to each page and run JavaScript extraction:
+Use browser MCP to navigate to each page and run JavaScript extraction.
 
-**Colors** — Run `getComputedStyle()` across key elements to find:
-- Background colors (page, sections, cards, buttons, footer)
-- Text colors (headings, body, muted, links, link hover)
-- Border colors
-- Accent/brand colors
-- Determine which is primary, secondary, accent
+**Colors** — Use a **multi-layered approach** to get the real brand palette, not CMS defaults:
+
+1. **Fetch and parse the theme stylesheet.** Find the site's theme/custom CSS file URL (look for `<link rel="stylesheet">` pointing to the theme directory — e.g., `/wp-content/themes/*/style.css`, or the main CSS bundle for non-WordPress sites). Fetch it via WebFetch and extract all color values (hex, rgb, rgba, hsl). This gives you the *intentionally chosen* colors, not framework defaults.
+
+2. **Run frequency-based color sampling via JavaScript.** Execute a script that iterates over all visible elements on the page, calls `getComputedStyle()` for `color`, `backgroundColor`, `borderColor`, and tallies each unique color value with a usage count. Rank by frequency. The top 10-15 most-used colors are the real palette. Ignore colors used fewer than 3 times (likely one-off overrides).
+
+3. **Filter out known CMS/framework defaults.** Discard colors that are standard WordPress, WooCommerce, Bootstrap, or browser defaults:
+   - WordPress admin colors: `#007cba`, `#006ba1`, `#005a87` (these are `--wp-admin-theme-color` variants)
+   - WordPress block editor palette: `#7a00df`, `#cf2e2e`, `#ff6900`, `#fcb900`, `#7bdcb5`, `#00d084`, `#8ed1fc`, `#0693e3`, `#abb8c3`, `#313131` (only if it appears ONLY in `.has-*-color` classes and not in the theme CSS)
+   - WordPress block gradients (vivid-cyan-blue, luminous-vivid-orange, etc.)
+   - Default browser colors: `rgb(0, 0, 0)`, `rgb(255, 255, 255)` (keep these only if theme CSS explicitly sets them)
+   - Bootstrap defaults: `#0d6efd`, `#6c757d`, `#198754`, `#dc3545`, `#ffc107`, `#0dcaf0`
+
+4. **Sample specific semantic elements.** After the frequency scan, also specifically extract colors from:
+   - The `<header>` / `<nav>` background and text
+   - The `<footer>` background and text
+   - Primary CTA buttons (the first prominent `<a>` or `<button>` with a background color)
+   - Link colors (find an `<a>` in body text and get its computed color)
+   - Hero/banner section background
+   - Card or product listing backgrounds and borders
+
+5. **Cross-reference.** Compare the theme CSS colors with the frequency-sampled colors. Colors that appear in BOTH the theme CSS AND the rendered page with high frequency are the true brand colors. Colors only in CMS defaults should be excluded.
+
+6. **Classify.** From the validated colors, determine:
+   - **Primary** — the dominant brand color (most prominent in header, buttons, accents)
+   - **Secondary** — supporting brand color
+   - **Accent** — highlight/CTA color
+   - **Background/foreground/muted/border** — structural colors
+
+   Store both the classified palette AND the raw frequency data so the cloner has full context.
 
 **Typography** — Extract from computed styles:
 - Font families (heading font, body font, any special fonts)
@@ -313,7 +346,10 @@ Save to `$RESEARCH/design-system.json`:
 
 ## Phase 3: Site Audit Report (Output 3)
 
-Goal: Generate a client-facing audit report that summarizes everything discovered in Phases 1 and 2. This report is written for a non-technical small business owner — no jargon, friendly professional tone.
+**Skip this phase if `--phases` was provided and `3` is not in the list.**
+**Requires:** `$RESEARCH/site-map.json` (Phase 1) and `$RESEARCH/design-system.json` (Phase 2). If either file is missing, warn the user and skip this phase.
+
+Goal: Generate a polished, client-facing audit report as a styled HTML file (primary deliverable) and a PDF (for sharing via WhatsApp/email). Written for a non-technical small business owner — no jargon, friendly professional tone.
 
 ### Determine the Business Name
 
@@ -329,96 +365,277 @@ Use this business name throughout the report.
 Read the outputs from Phase 1 and Phase 2:
 - `$RESEARCH/site-map.json` — page counts, unique pages, template groups
 - `$RESEARCH/design-system.json` — colors, fonts, layout, components
-- Screenshots from `$SCREENSHOTS/` — reference 2-3 in the report if available
+- Screenshots from `$SCREENSHOTS/` — embed them in the report
 
-Also capture during Phase 2 (or now via browser MCP if not already done):
-- **Mobile experience** — check the site at 390px viewport width. Note: is it responsive? Any issues with text size, button spacing, horizontal scroll, image scaling?
-- **SEO basics** — check each scraped page for: unique `<title>`, meta description, OG tags, alt text on images, JSON-LD structured data, sitemap.xml presence
-- **Performance indicators** — note obvious issues: very large images (>500KB), render-blocking scripts, excessive HTTP requests. If Lighthouse scores were captured, include the performance score.
+#### Locate Client Logo and Homepage Screenshot
 
-### Write the Report
+These assets are produced by Phase 2 and MUST be embedded in the report:
 
-Save to `$REPORT/site-audit.md`. Follow this exact structure:
+1. **Client logo** — Find the logo image file. Check in order:
+   - `$IMAGES/logo.png` (most common)
+   - `$IMAGES/logo.jpg`, `$IMAGES/logo.svg`
+   - `$SEO/logo.png`
+   - The `assets.logo` path from `design-system.json`
+   If found, read the file and base64-encode it for embedding in the report header.
 
-```markdown
-# [Business Name] — Website Review
+2. **Homepage screenshot** — Find at least one homepage screenshot from Phase 2:
+   - `$SCREENSHOTS/homepage-desktop.png` (preferred)
+   - `$SCREENSHOTS/comparison.png`
+   - Any file in `$SCREENSHOTS/` matching `*homepage*` or `*home*`
+   If found, read the file and base64-encode it for embedding in the "At a Glance" or homepage deep-dive section.
 
-## Your Current Site at a Glance
+3. **Client domain** — Extract from `base_url` in `site-map.json` (e.g., `www.galleryoneindia.com`). Display prominently in the report header alongside the business name.
 
-[2-3 sentences: how many pages, what the site covers, overall impression. Lead with what's working well before mentioning any issues.]
+#### Select Audit Pages
 
-## What We Found
+Pick **2-3 pages** to audit in depth. These pages get individual PageSpeed scores, screenshots, and SEO checks:
 
-### Pages & Structure
-- [List each unique page with a one-line description]
-- [Note template groups in plain language, e.g., "6 main pages + 47 individual artist profiles"]
-- [Flag any pages that seem outdated, empty, or redundant — frame as opportunity, not criticism]
+1. **Homepage** (always) — the front door
+2. **One interior content page** — pick the most important non-homepage page (e.g., About, Services, or a key product/listing page). Prefer a page with distinct layout from the homepage.
+3. **One template instance** (optional, if the site has template groups) — pick the `example_url` from the most important template group (e.g., a product page, artist profile, or blog post)
 
-### Design & Branding
+Store the selected page URLs as `$AUDIT_PAGES` (list of 2-3 full URLs). Use these consistently for PageSpeed, screenshots, and SEO checks below.
 
-**Your Color Palette:**
-- [Color Name] `#hexcode`
-- [Color Name] `#hexcode`
-- [repeat for each major color]
+#### Google PageSpeed Insights
 
-**Fonts:** [heading font] for headings, [body font] for text
+Fetch real performance data from the Google PageSpeed Insights API (free, no API key required) **for each page in `$AUDIT_PAGES`**:
 
-**Overall Style:** [Plain-language description — "clean and modern", "traditional with rich colors", etc.]
+```
+https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=<PAGE_URL>&strategy=<mobile|desktop>&category=performance&category=accessibility&category=seo
+```
 
-**What's working well:** [1-2 positive observations]
+For each page, call the API **twice** (mobile + desktop). That's 4-6 API calls total. Run them in parallel where possible (use concurrent WebFetch calls).
 
-**What could be improved:** [1-2 suggestions, framed constructively]
+Extract from each response:
+- **Performance score** (0-100): `lighthouseResult.categories.performance.score * 100`
+- **Accessibility score** (0-100): `lighthouseResult.categories.accessibility.score * 100`
+- **SEO score** (0-100): `lighthouseResult.categories.seo.score * 100`
+- **Core Web Vitals:**
+  - LCP (Largest Contentful Paint): `lighthouseResult.audits['largest-contentful-paint'].displayValue`
+  - CLS (Cumulative Layout Shift): `lighthouseResult.audits['cumulative-layout-shift'].displayValue`
+  - TBT (Total Blocking Time): `lighthouseResult.audits['total-blocking-time'].displayValue`
+  - Speed Index: `lighthouseResult.audits['speed-index'].displayValue`
+- **Key opportunities** (top 3 by estimated savings): `lighthouseResult.audits` — look for audits with `details.overallSavingsMs > 0`, sorted by savings descending. Extract the audit title and savings value.
 
-### Mobile Experience
-- [Is it responsive? How does it look on phones?]
-- [Specific issues if any — text too small, buttons too close together, horizontal scrolling, images not scaling]
-- [If it works well on mobile, say so]
+If an API call fails (timeout, site unreachable, 500 error), note "PageSpeed data unavailable for [page]" and fall back to qualitative observations for that page.
 
-### Speed & Performance
-- [Page load impression — fast, moderate, slow]
-- [Major issues if any — large uncompressed images, heavy scripts, etc.]
-- [Keep this non-technical — "Your homepage loads about X large images that could be optimized" not "render-blocking CSS in the critical path"]
+Save the raw PageSpeed responses to `$RESEARCH/pagespeed/` — one file per page+strategy:
+- `pagespeed-homepage-desktop.json`, `pagespeed-homepage-mobile.json`
+- `pagespeed-[slug]-desktop.json`, `pagespeed-[slug]-mobile.json`
 
-### SEO Basics
-- [Does each page have a unique title and description?]
-- [Are images using descriptive alt text?]
-- [Is there a sitemap.xml?]
-- [Any missing social sharing tags?]
-- [Frame gaps as easy wins, not failures]
+#### Screenshots
 
-[If screenshots are available, include 2-3 as image references:]
-![Homepage on desktop]($SCREENSHOTS/homepage-desktop.png)
-![Homepage on mobile]($SCREENSHOTS/homepage-mobile.png)
+Take screenshots of **each page in `$AUDIT_PAGES`** using browser MCP. For each page:
 
-## Our Recommendation
+- **Desktop** at 1440px viewport width (full-page screenshot if possible, otherwise above-the-fold)
+- **Mobile** at 390px viewport width
 
-[A short paragraph with your suggested approach based on what you found. Reference these 3 options:]
+Save to `$SCREENSHOTS/` with descriptive names:
+- `homepage-desktop.png`, `homepage-mobile.png`
+- `[slug]-desktop.png`, `[slug]-mobile.png`
 
-- **Option A: Fresh start** — New design, new structure, built from scratch for speed and mobile
-- **Option B: Faithful rebuild** — Keep your current look and page structure, rebuilt with modern technology for better speed and mobile experience
-- **Option C: Same structure, new look** — Keep your pages as they are, but with a fresh modern design
+These screenshots will be base64-embedded in the HTML report, so each audited page gets its own visual in the report.
 
-[End with:] Which direction feels right to you? Or we can mix and match — happy to discuss.
+#### Browser-Based SEO Checks
 
-## What Happens Next
+For **each page in `$AUDIT_PAGES`**, check via browser MCP (or WebFetch):
+- **`<title>` tag** — present? Unique across pages? Reasonable length (under 60 chars)?
+- **Meta description** — present? Unique? Reasonable length (under 160 chars)?
+- **OG tags** — og:title, og:description, og:image present?
+- **Image alt text** — count total images and how many are missing alt text
+- **JSON-LD structured data** — any present? What `@type`?
+- **H1 tag** — exactly one per page?
+- **Canonical URL** — present?
 
-1. We'll agree on the page structure together
-2. Then lock in the design direction — colors, style, feel
-3. I'll build your site and send you a preview link
-4. You tell me what to change — as many rounds as you need
-5. When you're happy, we go live
+Also check site-wide (once):
+- **sitemap.xml** — present and accessible?
+- **robots.txt** — present? Does it reference the sitemap?
+- **Broken pages** — note any pages from the site map returning errors (500, 404, etc.)
+
+Compile per-page SEO results into a comparison table for the report (page name × check → pass/fail).
+
+### Write the Report (HTML)
+
+Save to `$REPORT/site-audit.html`. This is a **self-contained HTML file** with embedded CSS — no external dependencies. It should look professional enough to share directly with a client.
+
+The HTML should include:
+
+1. **Inline CSS** — all styles embedded in a `<style>` tag. Use a clean, modern design:
+   - Sans-serif body font (system font stack or Inter/Open Sans via Google Fonts `<link>`)
+   - Generous whitespace, max-width ~800px centered container
+   - Subtle section dividers
+   - Print-friendly `@media print` styles (hide non-essential decorations, ensure black text)
+   - A4-friendly proportions
+
+2. **Color swatches** — render each color in the palette as a small colored circle/square (`<span>` with inline `background-color`) next to its name and hex code. This is the key advantage over markdown.
+
+3. **Screenshots** — embed screenshots from `$SCREENSHOTS/` as `<img>` tags with **base64-encoded data URIs** so the HTML file is fully self-contained. Read each screenshot file, base64-encode it, and embed as `src="data:image/png;base64,..."`. If screenshots are large, resize to max 800px width before encoding. Include screenshots for **each audited page** (desktop + mobile).
+
+4. **PageSpeed score gauges** — render the performance, accessibility, and SEO scores as visual gauge elements (colored circles or semi-circular gauges using CSS):
+   - 0-49: Red (`#ff4e42`)
+   - 50-89: Orange (`#ffa400`)
+   - 90-100: Green (`#0cce6b`)
+   - Show the numeric score prominently inside each gauge
+   - Display both mobile and desktop scores side by side
+
+5. **Core Web Vitals table** — a clean table showing LCP, CLS, TBT, Speed Index with values and pass/fail indicators
+
+Follow this content structure:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>[Business Name] — Website Review</title>
+  <style>
+    /* Modern, clean report styles — embed all CSS here */
+    /* Include @media print styles */
+  </style>
+</head>
+<body>
+  <header>
+    <!-- Client logo (base64-encoded from $IMAGES/logo.png), business name, domain -->
+    <img src="data:image/png;base64,..." alt="[Business Name] logo" class="client-logo" />
+    <h1>[Business Name] — Website Review</h1>
+    <p class="domain">[domain, e.g. www.galleryoneindia.com]</p>
+    <p class="subtitle">Prepared by Publifai | [Date]</p>
+  </header>
+
+  <section id="at-a-glance">
+    <!-- 2-3 sentences: page count, site overview, overall impression -->
+    <!-- Lead with what's working well -->
+    <!-- Include a homepage screenshot (base64-encoded from $SCREENSHOTS/) -->
+    <figure class="hero-screenshot">
+      <img src="data:image/png;base64,..." alt="Current homepage" />
+      <figcaption>Your current homepage</figcaption>
+    </figure>
+  </section>
+
+  <section id="pages">
+    <h2>Pages & Structure</h2>
+    <!-- List unique pages with descriptions -->
+    <!-- Template groups in plain language -->
+    <!-- Flag broken/error pages if any -->
+  </section>
+
+  <section id="design">
+    <h2>Design & Branding</h2>
+    <!-- Color palette with rendered swatches -->
+    <!-- Font information -->
+    <!-- Overall style description -->
+    <!-- What's working well / what could be improved -->
+  </section>
+
+  <!-- ===== PER-PAGE DEEP DIVES ===== -->
+  <!-- Repeat this block for each page in $AUDIT_PAGES (2-3 pages) -->
+
+  <section id="page-homepage" class="page-audit">
+    <h2>Homepage — Deep Dive</h2>
+
+    <div class="page-screenshots">
+      <!-- Desktop + mobile screenshots side by side, base64-encoded -->
+      <figure>
+        <img src="data:image/png;base64,..." alt="Homepage on desktop" />
+        <figcaption>Desktop (1440px)</figcaption>
+      </figure>
+      <figure>
+        <img src="data:image/png;base64,..." alt="Homepage on mobile" />
+        <figcaption>Mobile (390px)</figcaption>
+      </figure>
+    </div>
+
+    <div class="page-scores">
+      <h3>Speed & Performance</h3>
+      <!-- PageSpeed score gauges for THIS page: Performance, Accessibility, SEO -->
+      <!-- Show mobile and desktop side by side -->
+      <!-- Core Web Vitals table for THIS page -->
+      <!-- Plain-language: "Your homepage scores 34/100 on phones..." -->
+      <!-- Top 3 opportunities with estimated savings -->
+    </div>
+
+    <div class="page-seo">
+      <h3>Search Visibility</h3>
+      <!-- SEO checks for THIS page: title, description, OG, alt text, H1, structured data -->
+      <!-- Pass/fail indicators for each check -->
+    </div>
+  </section>
+
+  <section id="page-[slug]" class="page-audit">
+    <h2>[Page Name] — Deep Dive</h2>
+    <!-- Same structure: screenshots, scores, SEO checks -->
+    <!-- Repeat for each additional audited page -->
+  </section>
+
+  <!-- ===== END PER-PAGE DEEP DIVES ===== -->
+
+  <section id="seo-summary">
+    <h2>SEO Overview</h2>
+    <!-- Site-wide SEO summary: sitemap, robots.txt, overall alt text coverage -->
+    <!-- Comparison table: page × check → pass/fail across all audited pages -->
+    <!-- Frame gaps as easy wins -->
+  </section>
+
+  <section id="recommendation">
+    <h2>Our Recommendation</h2>
+    <!-- Approach suggestion based on findings -->
+    <!-- Three options: Fresh start / Faithful rebuild / Same structure new look -->
+    <!-- "Which direction feels right to you?" -->
+  </section>
+
+  <section id="next-steps">
+    <h2>What Happens Next</h2>
+    <ol>
+      <li>We'll agree on the page structure together</li>
+      <li>Then lock in the design direction — colors, style, feel</li>
+      <li>I'll build your site and send you a preview link</li>
+      <li>You tell me what to change — as many rounds as you need</li>
+      <li>When you're happy, we go live</li>
+    </ol>
+  </section>
+
+  <footer>
+    <!-- "This report was generated from an automated scan..." -->
+    <!-- Publifai contact info -->
+  </footer>
+</body>
+</html>
 ```
 
 ### Report Guidelines
 
-- **Length:** Keep it to 1-2 pages when printed. Be concise.
+- **Length:** The HTML should render to roughly 2-4 printed pages. Be concise but include the data.
 - **Tone:** Friendly consultant, not a technical scanner. Write as if you're explaining findings to the business owner over coffee.
 - **Framing:** "Here's what we can improve" not "here's what's wrong." Lead each section with positives.
-- **No jargon:** Don't use terms like "render-blocking," "DOM," "viewport," "CDN." Translate everything into plain language.
-- **Screenshots:** Reference 2-3 screenshots from `$SCREENSHOTS/` as markdown image links. Pick the most useful ones (homepage desktop, homepage mobile, one interior page).
-- **Color palette:** List colors with friendly names and hex codes (e.g., "Dark Charcoal `#313131`", "Ocean Blue `#007cba`").
+- **No jargon:** Don't use terms like "render-blocking," "DOM," "viewport," "CDN," "LCP." Translate everything into plain language. For example, say "time until your page looks ready" instead of "Largest Contentful Paint."
+- **PageSpeed scores:** Present the numbers but always explain what they mean in human terms. "34/100 on mobile means most visitors on phones will leave before your site finishes loading."
+- **Color palette:** Use friendly names with hex codes and rendered swatches (e.g., a colored circle + "Dark Charcoal #313131").
+- **Screenshots:** Embed desktop + mobile screenshots for each audited page directly in the HTML as base64 data URIs.
+- **Client logo:** Embed the client's logo (base64-encoded from `$IMAGES/logo.png`) in the report header. Style it at max 160px wide, centered above the business name.
+- **Client domain:** Show the domain (e.g., `www.galleryoneindia.com`) prominently in the header below the business name.
+- **Homepage screenshot:** Embed at least one homepage screenshot (base64-encoded from `$SCREENSHOTS/`) in the "At a Glance" section or the homepage deep-dive. Show it at max 100% width with a subtle border/shadow.
+- **Self-contained:** The HTML file must work when opened directly in a browser with no internet connection (except Google Fonts, which degrade gracefully to system fonts).
+
+### Generate PDF
+
+After saving the HTML report, generate a PDF version at `$REPORT/site-audit.pdf`.
+
+**Method:** Use a headless browser or HTML-to-PDF tool to convert the HTML file to PDF. Try these approaches in order:
+
+1. **Puppeteer/Playwright** (if available): `page.goto('file:///$REPORT/site-audit.html'); page.pdf({path: '$REPORT/site-audit.pdf', format: 'A4'})`
+2. **wkhtmltopdf** (if installed): `wkhtmltopdf $REPORT/site-audit.html $REPORT/site-audit.pdf`
+3. **Python weasyprint** (if available): `weasyprint $REPORT/site-audit.html $REPORT/site-audit.pdf`
+4. **Fallback:** Write a small Node.js script using puppeteer (`npx puppeteer` if needed) to load the HTML and print to PDF
+
+The PDF should faithfully reproduce the HTML report including color swatches, screenshots, and score gauges.
+
+Both files (`site-audit.html` and `site-audit.pdf`) should exist when Phase 3 is complete.
 
 ## Phase 4: Content Extraction (Output 4)
+
+**Skip this phase if `--phases` was provided and `4` is not in the list.**
+**Requires:** `$RESEARCH/site-map.json` (Phase 1). If missing, warn the user and skip this phase.
 
 Goal: Extract content from representative pages ONLY.
 
@@ -557,32 +774,41 @@ These are hard limits — never violate them:
 
 ## Completion
 
-When all 4 phases are done, print a summary:
+When all requested phases are done, print a summary. Only include sections for phases that were actually run. If `--phases` was used, also note which phases were skipped.
 
 ```
 Site Discovery Complete: example.com
 ═══════════════════════════════════════
+Phases run: 1, 2, 3, 4  (or "1, 2" if --phases was used)
 
-Site Map:
+Site Map:                              ← only if Phase 1 ran
   • 6 unique pages discovered
   • 2 template groups (47 products, 12 blog posts)
   • 64 total pages on site
   Saved → $RESEARCH/site-map.json
 
-Design System:
+Design System:                         ← only if Phase 2 ran
   • Primary: #313131, Accent: #007cba
   • Fonts: Playfair Display (headings), Open Sans (body)
   • 16 assets downloaded to $IMAGES/
   Saved → $RESEARCH/design-system.json
 
-Site Audit Report:
-  • Client-facing website review generated
-  Saved → $REPORT/site-audit.md
+Site Audit Report:                     ← only if Phase 3 ran
+  • Client-facing website review with PageSpeed scores
+  • Desktop: Performance XX/100, Accessibility XX/100, SEO XX/100
+  • Mobile:  Performance XX/100, Accessibility XX/100, SEO XX/100
+  Saved → $REPORT/site-audit.html
+  Saved → $REPORT/site-audit.pdf
 
-Content Extracted:
+Content Extracted:                     ← only if Phase 4 ran
   • 8 pages scraped (6 unique + 2 templates)
   • 24 images downloaded
   Saved → $RESEARCH/content/
 
 Next step: Share the audit report with the client, then run /clone-website with the same --client flag to build the site.
+```
+
+If phases were skipped, suggest the next command to run remaining phases:
+```
+To run remaining phases: /discover-site <url> --client <name> --phases 3,4
 ```
