@@ -12,7 +12,7 @@ Instead of asking clients to manually provide every piece of content, we scrape 
 - Feed the design system into our build step
 - Generate a client-facing site audit report shared via WhatsApp
 
-See [`publifai-docs/product/site-building-process.md`](https://github.com/publifai/publifai-docs) for the full onboarding flow.
+See [`publifai-docs/product/site-building-process.md`](https://github.com/PublifAI/publifai-docs/blob/main/product/site-building-process.md) for the full onboarding flow.
 
 ## How It Fits Into Publifai
 
