@@ -47,3 +47,25 @@ next-env.d.ts
 
 # Local temp files
 temp/
+
+# Cloner execution output (site-specific, generated per run)
+output/
+docs/research/site-map.json
+docs/research/design-system.json
+docs/research/content/
+docs/research/components/
+docs/research/BEHAVIORS.md
+docs/research/PAGE_TOPOLOGY.md
+docs/design-references/
+public/images/
+public/videos/
+public/seo/
+scripts/download-assets.mjs
+scripts/download-additional-assets.mjs
+
+# Site-specific components built during cloning
+src/components/[A-Z]*
+src/types/
+
+# Agent worktrees
+.claude/worktrees/
