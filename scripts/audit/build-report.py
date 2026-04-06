@@ -238,10 +238,9 @@ SNIPPETS = NARR.get('snippets', {})
 if not SNIPPETS.get('client_share'):
     _owner = ((CLIENT.get('owner') or {}).get('name') or '').split(' ')[0] or 'there'
     SNIPPETS['client_share'] = (
-        f"Hi {_owner}, I've put together a quick review of {DOMAIN} — "
-        f"what's working, what we'd improve, and what we'd ship in week one. "
-        f"Take a look whenever you get a moment:\n\n{PUBLIC_URL}\n\n"
-        f"Happy to walk you through it on a call if easier."
+        f"Hi {_owner}, I took a fresh look at {DOMAIN} and put together a quick review — "
+        f"what's working, what we'd improve, and what we'd ship in week one:\n\n{PUBLIC_URL}\n\n"
+        f"All of this is what we'll fix when we build your new website."
     )
 
 stats_html = ''.join(
