@@ -232,6 +232,18 @@ GEO = NARR.get('geo', {})
 RECO = NARR.get('recommendation', {})
 SNIPPETS = NARR.get('snippets', {})
 
+# Auto-generate the "share with client" WhatsApp message if the narrative
+# doesn't supply one. This is the message Publifai pastes into WhatsApp to
+# hand the audit over to the client — separate from the marketing snippets.
+if not SNIPPETS.get('client_share'):
+    _owner = ((CLIENT.get('owner') or {}).get('name') or '').split(' ')[0] or 'there'
+    SNIPPETS['client_share'] = (
+        f"Hi {_owner}, I've put together a quick review of {DOMAIN} — "
+        f"what's working, what we'd improve, and what we'd ship in week one. "
+        f"Take a look whenever you get a moment:\n\n{PUBLIC_URL}\n\n"
+        f"Happy to walk you through it on a call if easier."
+    )
+
 stats_html = ''.join(
     f'<div class="stat"><div class="big">{s["value"]}</div><div class="label">{s["label"]}</div></div>'
     for s in NARR.get('hero_stats', [])
