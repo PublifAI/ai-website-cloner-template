@@ -24,7 +24,10 @@ audit-data.json + client.json + screenshots on disk.
 
 This file is generic — there is NOTHING client-specific in here.
 """
-import base64, json, pathlib, datetime, mimetypes, sys
+import base64, json, pathlib, datetime, mimetypes, sys, html as _html
+
+def esc(x):
+    return _html.escape(str(x), quote=False) if x is not None else ''
 
 if len(sys.argv) < 2:
     print("Usage: build-report.py <client-dir>", file=sys.stderr)
@@ -208,17 +211,19 @@ if COMPS:
 '''
 
 def ul(items):
-    return '<ul>' + ''.join(f'<li>{x}</li>' for x in (items or [])) + '</ul>'
+    return '<ul>' + ''.join(f'<li>{esc(x)}</li>' for x in (items or [])) + '</ul>'
 
 def improve_card(icon, title, items, accent_color):
     if not items: return ''
-    lis = ''.join(f'<li>{x}</li>' for x in items)
+    lis = ''.join(f'<li>{esc(x)}</li>' for x in items)
+    n = len(items)
+    label = f'{n} issue' if n == 1 else f'{n} issues'
     return f'''
     <div class="imp-card" style="--accent:{accent_color}">
       <div class="imp-head">
         <span class="imp-icon">{icon}</span>
         <h3>{title}</h3>
-        <span class="imp-count">{len(items)}</span>
+        <span class="imp-count">{label}</span>
       </div>
       <ul>{lis}</ul>
     </div>'''
@@ -246,13 +251,13 @@ def seo_per_page_table():
     return ''.join(rows)
 
 def wins_ul(items):
-    return '<ul class="wins-list">' + ''.join(f'<li>{x}</li>' for x in (items or [])) + '</ul>'
+    return '<ul class="wins-list">' + ''.join(f'<li>{esc(x)}</li>' for x in (items or [])) + '</ul>'
 
 # JSON-LD scorecard rows from narrative (since not all sites need same schema types)
 def jsonld_rows():
     rows = NARR.get('geo', {}).get('jsonld_scorecard', [])
     return ''.join(
-        f'<tr><td><code>{r["type"]}</code></td><td><span class="pill {r.get("status","fail")}">{r.get("label",r.get("status",""))}</span></td><td>{r.get("why","")}</td></tr>'
+        f'<tr><td><code>{esc(r["type"])}</code></td><td><span class="pill {r.get("status","fail")}">{esc(r.get("label",r.get("status","")))}</span></td><td>{esc(r.get("why",""))}</td></tr>'
         for r in rows
     )
 
@@ -367,7 +372,7 @@ HTML = f'''<!DOCTYPE html>
   .imp-head{{display:flex;align-items:center;gap:10px;margin-bottom:4px}}
   .imp-head h3{{margin:0;font-size:15px;font-weight:700;color:#181818;text-transform:none;letter-spacing:0;border:none;padding:0;flex:1}}
   .imp-icon{{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:color-mix(in srgb,var(--accent) 14%,#fff);font-size:15px;line-height:1}}
-  .imp-count{{display:inline-block;min-width:24px;text-align:center;padding:2px 9px;border-radius:999px;background:var(--accent);color:#fff;font-size:11px;font-weight:700}}
+  .imp-count{{display:inline-block;padding:3px 10px;border-radius:999px;background:var(--accent);color:#fff;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;white-space:nowrap}}
   .imp-card ul{{margin:8px 0 10px;padding-left:20px}}
   .imp-card li{{margin-bottom:7px;color:#3a3a3a;font-size:14px}}
   .imp-card strong{{color:var(--accent);font-weight:700}}
