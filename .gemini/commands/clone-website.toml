@@ -90,11 +90,14 @@ If the user provides additional instructions (specific fidelity level, customiza
      - `case` to understand what kind of build this is (2a = fresh from scratch, 2b = migration with improvements, 2c = same structure new design)
      - `design` fields if populated (client-approved colors/fonts override what was extracted)
      - `structure.pages` if populated (client-approved page list)
-   - **If it doesn't exist and `--client` was provided**, create it with defaults (same schema as `/discover-site` — see that skill for the template). Set `status` = `"build"` and `steps.build.started` = today.
-   - When the clone **starts**, update client.json:
-     - Set `status` = `"build"`
-     - Set `steps.build.started` = today (if not already set)
-     - Set `updated` = today
+   - **If it doesn't exist and `--client` was provided**, create it with defaults (same schema as `/discover-site` — see that skill for the template).
+   - **Determine which phase of the Publifai flow this run is:**
+     - If `phases.B_capture.discover` has any completed sub-phases and `phases.B_capture.mirror.status` is `"pending"` → this is **Phase B2 (Mirror)** of Phase B (Capture). Set `status` = `"capturing"`, `phases.B_capture.mirror.status` = `"running"`.
+     - Otherwise → this is **Phase D (Build)**. Set `status` = `"building"`, `phases.D_build.started` = today (if not already set).
+   - Set `updated` = today.
+   - When the clone **completes**:
+     - Phase B2: set `phases.B_capture.mirror.status` = `"completed"`. The `deployed_url` field is set by the separate mirror-deploy wrapper (not this skill).
+     - Phase D: set `phases.D_build.completed` = today.
 5. **Set output paths** based on whether `--client` was provided:
 
    | Output | With `--client <name>` | Without `--client` (legacy) |
