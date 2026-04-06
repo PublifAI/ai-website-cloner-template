@@ -4,7 +4,7 @@ Fork of [JCodesMore/ai-website-cloner-template](https://github.com/JCodesMore/ai
 
 ## Why We Use This
 
-Publifai builds websites for small businesses via WhatsApp. When a client already has a website (Case 2 in our process), we need to capture their existing site's content, structure, and design before building the new one. This cloner handles **Step 0: Capture Existing Site** — the first step in our site building process.
+Publifai builds websites for small businesses via WhatsApp. When a client already has a website (Case 2 in our process), we need to capture their existing site's content, structure, and design before building the new one. This cloner powers **Phase B: Capture** in our site building process (Phases A–F, see publifai-docs).
 
 Instead of asking clients to manually provide every piece of content, we scrape their existing site and use the output to:
 - Pre-fill business info (content, images, contact details)
@@ -23,16 +23,16 @@ Client shares URL on WhatsApp
   → Outputs: site map, design system, content extraction
   → Agent summarizes findings, sends to client
   → Agent generates site audit report
-  → Feeds into Steps 1-4 of site building process
+  → Feeds into Phases C-D of site building process
 ```
 
 The three outputs map directly to our process:
 
 | Output | File | Feeds into |
 |--------|------|------------|
-| Site map | `research/site-map.json` | Step 2 — agree on page structure with client |
-| Design system | `research/design-system.json` | Step 3 — agree on design direction |
-| Page content | `research/content/*.json` | Step 4 — generate the new site without re-asking for content |
+| Site map | `research/site-map.json` | Phase C1 — agree on page structure with client |
+| Design system | `research/design-system.json` | Phase C2 — agree on design direction |
+| Page content | `research/content/*.json` | Phase D — generate the new site without re-asking for content |
 
 ## Two-Step Workflow
 

@@ -63,6 +63,7 @@ $CLIENTS_DIR/<name>/              # With --client (recommended)
 The target is whatever page `the target URL provided by the user` resolves to. Clone exactly what's visible at that URL. Unless the user specifies otherwise, use these defaults:
 
 - **Fidelity level:** Pixel-perfect — exact match in colors, spacing, typography, animations
+- **Page limit:** Build **5–8 pages maximum** unless the user explicitly requests more. This includes unique pages + one per template group. Homepage is always first.
 - **In scope:** Visual layout and styling, component structure and interactions, responsive design, mock data for demo purposes
 - **Out of scope:** Real backend / database, authentication, real-time features
 - **Customization:** None — pure emulation
@@ -101,12 +102,13 @@ If the user provides additional instructions (specific fidelity level, customiza
    | SEO assets | `$CLIENTS_DIR/<name>/assets/seo/` | `public/images/seo/` |
    | HTML output | `$CLIENTS_DIR/<name>/output/` | `output/` |
    | Download scripts | `$CLIENTS_DIR/<name>/scripts/` | `scripts/` |
+   | Audit report | `$CLIENTS_DIR/<name>/report/` | `docs/research/` |
 
-   Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$COMPONENTS`, `$IMAGES`, `$SEO`, `$OUTPUT`, and `$SCRIPTS` as placeholders for the resolved paths.
+   Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$COMPONENTS`, `$IMAGES`, `$SEO`, `$OUTPUT`, `$SCRIPTS`, and `$REPORT` as placeholders for the resolved paths.
 
 6. **Check for discovery output.** If `$RESEARCH/site-map.json` exists (from running `/discover-site`), read it and use it to determine which pages to clone. If `$RESEARCH/design-system.json` exists, use it for design tokens. If `$RESEARCH/content/` has files, use them for page content. This avoids re-scraping what was already discovered.
-5. Create all output directories.
-6. When working with multiple pages, optionally confirm whether to run them in parallel (recommended) or sequentially.
+7. Create all output directories.
+8. When working with multiple pages, optionally confirm whether to run them in parallel (recommended) or sequentially.
 
 ## Guiding Principles
 
@@ -174,15 +176,28 @@ Every builder agent must verify its output is valid HTML. After merging, open ea
 
 Navigate to the target URL with browser MCP.
 
-### Check for Discovery Data
+### Check for Discovery Data (preferred path)
 
-If `/discover-site` was run first:
-1. Read `$RESEARCH/site-map.json` — use its page list to determine what to clone
-2. Read `$RESEARCH/design-system.json` — use for tailwind.config.js generation
-3. Read `$RESEARCH/content/*.json` — use for page content instead of re-scraping
-4. Skip to Phase 2 (Foundation Build) with the discovery data
+If `/discover-site` was run first, its outputs are your primary data source — **do not re-scrape what was already discovered.**
 
-If no discovery data exists, proceed with single-page extraction below.
+1. **Read `$RESEARCH/site-map.json`** — this is your page list. Use `unique_pages` + one `example_url` per `template_groups` entry. Apply the 5–8 page cap:
+   - Homepage is always included and always built first
+   - All unique pages from the site map (typically 4–6)
+   - One representative per template group (typically 1–2)
+   - If the total exceeds 8, prioritize pages present in the main navigation; ask the user which to drop
+   - If `client.json` has `structure.pages` populated (client-approved list), use that instead
+
+2. **Read `$RESEARCH/design-system.json`** — use directly for `tailwind.config.js` generation (colors, fonts, spacing, components). Do not re-extract design tokens from the browser.
+
+3. **Read `$RESEARCH/content/*.json`** — use for page text content, headings, meta tags, image references, and template field mappings. Only visit pages in the browser for visual extraction (computed styles, interaction sweep) — text content comes from these files.
+
+4. **Read `$REPORT/site-audit.md`** (or `.html`) if it exists — note any issues flagged (mobile problems, missing meta tags, broken links) as a QA checklist for Phase 5.
+
+5. **Use existing assets** — images already downloaded to `$IMAGES/` and `$SEO/` during discovery. Do not re-download them (see Phase 2 step 4).
+
+6. Proceed to Phase 2 with discovery data. You still need the browser for visual inspection (computed styles, interaction sweep, screenshots) but you already have the site structure, design tokens, content, and assets.
+
+If no discovery data exists, proceed with single-page extraction below. The browser becomes your only data source — extract everything from scratch, but still respect the 5–8 page limit.
 
 ### Screenshots
 - Take **full-page screenshots** at desktop (1440px) and mobile (390px) viewports
@@ -220,7 +235,7 @@ This is sequential. Do it yourself (not delegated to an agent):
 
 ### 1. Create tailwind.config.js
 
-Generate `output/tailwind.config.js` with design tokens from the target site:
+Generate `$OUTPUT/tailwind.config.js` with design tokens from the target site:
 
 ```javascript
 /** @type {import('tailwindcss').Config} */
@@ -284,9 +299,11 @@ npx tailwindcss -i css/input.css -o css/output.css --minify
 echo "Build complete: css/output.css"
 ```
 
-### 4. Download global assets
+### 4. Populate output assets
 
-Write and run `scripts/download-assets.mjs` to download all images, videos, fonts, and favicons to `output/images/`.
+**If discovery data exists** (preferred): Copy assets from `$IMAGES/` → `$OUTPUT/images/` and `$SEO/` → `$OUTPUT/images/seo/`. These were already downloaded during `/discover-site`. Only download net-new assets found during visual inspection that weren't captured in discovery.
+
+**If no discovery data exists**: Write and run `$SCRIPTS/download-assets.mjs` to download all images, videos, fonts, and favicons to `$OUTPUT/images/`.
 
 ### 5. Create js/main.js
 
@@ -310,6 +327,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 ## Phase 3: Section Specification & Dispatch
 
+### Build Order
+
+**Homepage is always built first.** It establishes the master header, footer, and global patterns that all other pages reuse. Once the homepage is complete and visually verified, build remaining pages in parallel — they copy the homepage's header/footer and only need their unique body sections built.
+
+For multi-page clones:
+1. **Homepage** — full extraction + build of every section (header, hero, all body sections, footer)
+2. **Other unique pages** — copy header/footer from homepage, extract + build only the body sections unique to each page. Can run in parallel.
+3. **Template pages** — one representative per template group. Copy header/footer, build the template body with `<!-- VARIABLE -->` markers.
+
 This is the core loop. For each section in your page topology, you do THREE things: **extract**, **write the spec file**, then **dispatch builders**.
 
 ### Step 1: Extract
@@ -324,8 +350,8 @@ Create spec files in `$COMPONENTS/` with the same template as before, but change
 # <SectionName> Specification
 
 ## Overview
-- **Target output:** Section HTML for `output/index.html` (or whichever page)
-- **Screenshot:** `docs/design-references/<screenshot-name>.png`
+- **Target output:** Section HTML for `$OUTPUT/index.html` (or whichever page)
+- **Screenshot:** `$SCREENSHOTS/<screenshot-name>.png`
 - **Interaction model:** <static | click-driven | scroll-driven | time-driven>
 
 ## DOM Structure
@@ -435,18 +461,19 @@ Add comments marking variable content:
 
 After assembly:
 
-1. Build the CSS: `cd output && bash build.sh`
-2. Open each HTML file in the browser via browser MCP
-3. Compare section by section with the original at desktop (1440px) and mobile (390px)
-4. Fix any discrepancies directly in the HTML files
-5. Test all interactive behaviors
-6. Verify Lighthouse score target (95+)
+1. Build the CSS: `cd $OUTPUT && bash build.sh`
+2. **Check the audit report** — if `$REPORT/site-audit.md` (or `.html`) exists from `/discover-site`, review its findings. Use flagged issues (missing meta tags, mobile layout problems, broken links, slow-loading assets) as a QA checklist. The clone should fix these where possible, not replicate them.
+3. Open each HTML file in the browser via browser MCP
+4. Compare section by section with the original at desktop (1440px) and mobile (390px)
+5. Fix any discrepancies directly in the HTML files
+6. Test all interactive behaviors
+7. Verify Lighthouse score target (95+)
 
 ## Pre-Dispatch Checklist
 
 Before dispatching ANY builder agent:
 
-- [ ] Spec file written to `docs/research/components/<name>.spec.md` with ALL sections filled
+- [ ] Spec file written to `$COMPONENTS/<name>.spec.md` with ALL sections filled
 - [ ] Every CSS value mapped to a Tailwind class (or documented as a custom value)
 - [ ] Interaction model is identified (static / click / scroll / time)
 - [ ] For stateful components: every state's content and styles are captured
@@ -473,9 +500,17 @@ Before dispatching ANY builder agent:
 
 If `--client` was provided, update `$CLIENTS_DIR/<name>/client.json` (read-modify-write, merge don't replace):
 
+**On success:**
 - Set `steps.build.completed` = today
 - Set `structure.pages` = list of page names built (e.g., `["Home", "About", "Contact", "Artist Profile", "Product Page"]`)
 - Set `updated` = today
+
+**On failure** (build breaks, critical pages can't be cloned, unrecoverable errors):
+- Set `status` = `"build_failed"`
+- Set `steps.build.failed` = today
+- Set `steps.build.error` = brief description of what went wrong
+- Set `updated` = today
+- Do NOT set `steps.build.completed`
 
 ### Report
 
@@ -487,4 +522,4 @@ When done, report:
 - Build status (`bash build.sh` result)
 - Visual QA results
 - Any known gaps or limitations
-- File listing of the `output/` directory
+- File listing of the `$OUTPUT/` directory

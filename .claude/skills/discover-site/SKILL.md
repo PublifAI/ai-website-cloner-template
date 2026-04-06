@@ -36,7 +36,7 @@ This skill produces FOUR outputs that feed into the site-building process:
      - `existing_site.url` as the target URL if no URL was provided as an argument
      - `business.name` as the business name for the audit report (instead of guessing from the site)
      - `case` to understand the client scenario (1, 2a, 2b, 2c)
-     - `steps.discovery.phases` to check which phases are already completed — skip completed phases unless `--force` is passed
+     - `phases.B_capture.discover` to check which sub-phases are already completed — skip completed sub-phases unless `--force` is passed
      - `design` fields if already populated (e.g., client has already approved colors)
    - **If it doesn't exist**, create it with defaults:
      ```json
@@ -46,24 +46,24 @@ This skill produces FOUR outputs that feed into the site-building process:
        "owner": { "name": null, "phone": null, "email": null },
        "business": { "type": null, "description": null, "location": null, "services": [], "hours": null, "socials": {} },
        "case": "2b",
-       "status": "discovery",
-       "steps": {
-         "discovery": {
+       "status": "capturing",
+       "phases": {
+         "A_onboard": { "started": "<today>", "completed": "<today>" },
+         "B_capture": {
            "started": "<today>",
            "completed": null,
-           "phases": {
+           "discover": {
              "site_map": { "status": "pending", "completed": null },
              "design_system": { "status": "pending", "completed": null },
-             "audit_report": { "status": "pending", "completed": null, "report_shared": null },
+             "audit_report": { "status": "pending", "completed": null, "report_shared": null, "report_deployed_url": null },
              "content_extraction": { "status": "pending", "completed": null }
-           }
+           },
+           "mirror": { "status": "pending", "deployed_url": null }
          },
-         "info_gathering": { "started": null, "completed": null },
-         "structure_review": { "started": null, "approved": null },
-         "design_review": { "started": null, "approved": null },
-         "build": { "started": null, "completed": null },
-         "preview": { "started": null, "iterations": 0 },
-         "live": { "launched": null }
+         "C_define": { "started": null, "structure_approved": null, "design_approved": null },
+         "D_build": { "started": null, "completed": null },
+         "E_preview": { "started": null, "iterations": 0 },
+         "F_launch": { "launched": null }
        },
        "domains": { "subdomain": "<slug>.publif.ai", "custom": "<domain>", "custom_active": false },
        "existing_site": { "url": "https://<domain>", "scraped": false, "pages_discovered": null, "pages_scraped": null },
@@ -101,16 +101,18 @@ This skill produces FOUR outputs that feed into the site-building process:
 
 **When a phase completes,** update the following fields (merge, don't replace):
 
+**Note:** All discovery sub-phases live under `phases.B_capture.discover.*` in the new schema. This skill executes Phase B1 (Discover) of Phase B (Capture) in the site-building process.
+
 | Phase completes | Fields to set |
 |-----------------|---------------|
-| Phase 1 (Site Map) | `steps.discovery.phases.site_map.status` = `"completed"`, `.completed` = today, `existing_site.pages_discovered` = total count, `existing_site.pages_scraped` = pages_to_scrape, `existing_site.scraped` = `true`, `status` = `"discovery"` (if not already set), `steps.discovery.started` = today (if not already set) |
-| Phase 2 (Design System) | `steps.discovery.phases.design_system.status` = `"completed"`, `.completed` = today, `design.colors` = `{primary, secondary, accent}` from design-system.json, `design.fonts` = `{heading, body}` from design-system.json |
-| Phase 3 (Audit Report) | `steps.discovery.phases.audit_report.status` = `"completed"`, `.completed` = today |
-| Phase 4 (Content Extraction) | `steps.discovery.phases.content_extraction.status` = `"completed"`, `.completed` = today |
+| Phase 1 (Site Map) | `phases.B_capture.discover.site_map.status` = `"completed"`, `.completed` = today, `existing_site.pages_discovered` = total count, `existing_site.pages_scraped` = pages_to_scrape, `existing_site.scraped` = `true`, `status` = `"capturing"` (if not already set), `phases.B_capture.started` = today (if not already set) |
+| Phase 2 (Design System) | `phases.B_capture.discover.design_system.status` = `"completed"`, `.completed` = today, `design.colors` = `{primary, secondary, accent}` from design-system.json, `design.fonts` = `{heading, body}` from design-system.json |
+| Phase 3 (Audit Report) | `phases.B_capture.discover.audit_report.status` = `"completed"`, `.completed` = today. After deploy step (see below), also set `.report_deployed_url` = `https://<slug>.pages.dev/audit/` |
+| Phase 4 (Content Extraction) | `phases.B_capture.discover.content_extraction.status` = `"completed"`, `.completed` = today |
 
 **When ALL requested phases are done:**
 - Set `updated` = today
-- If all 4 phases are now `"completed"`, set `steps.discovery.completed` = today
+- Discover is complete only when all 4 sub-phases are `"completed"`. Phase B itself (`phases.B_capture.completed`) is set by `/clone-website` + mirror deploy, not here.
 
 **When a phase is skipped** (via `--phases` flag): leave its status as-is.
 
@@ -697,7 +699,35 @@ After saving the HTML report, generate a PDF version at `$REPORT/site-audit.pdf`
 
 The PDF should faithfully reproduce the HTML report including color swatches, screenshots, and score gauges.
 
-Both files (`site-audit.html` and `site-audit.pdf`) should exist when Phase 3 is complete.
+Both files (`site-audit.html` and `site-audit.pdf`) should exist before moving on.
+
+### Deploy the Audit to `<slug>.pages.dev/audit/`
+
+After the HTML + PDF are generated, publish the audit to the client's Cloudflare Pages project so it's shareable via a live URL. This assumes `scripts/provision-site.sh` has already been run.
+
+The deploy source of truth is `clients/<client-folder>/public/`. Every Publifai skill that wants something live on `<slug>.pages.dev` writes into that folder and then calls the shared deploy script — no per-skill staging.
+
+**Steps:**
+
+1. **Read slug** from `client.json`: `domains.subdomain` (strip `.pages.dev`).
+2. **Populate `public/audit/`** in the client folder (outside this repo, in `$CLIENTS_DIR/<name>/public/audit/`):
+   - Copy `$REPORT/site-audit.html` → `$CLIENTS_DIR/<name>/public/audit/index.html`
+   - Copy `$REPORT/site-audit.pdf` → `$CLIENTS_DIR/<name>/public/audit/site-audit.pdf`
+3. If `$CLIENTS_DIR/<name>/public/index.html` does not yet exist, create a minimal placeholder linking to `/audit/` (so visitors hitting the root see something). Use `[Business Name]` from `client.json`:
+   ```html
+   <!DOCTYPE html>
+   <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>[Business Name] — Coming soon on Publifai</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:10vh auto;padding:0 24px;color:#1a1a1a}h1{font-size:28px;margin-bottom:8px}p{line-height:1.6;color:#555}a{display:inline-block;margin-top:16px;padding:10px 18px;background:#111;color:#fff;text-decoration:none;border-radius:6px}a:hover{background:#333}</style></head><body><h1>[Business Name]</h1><p>Your new website is being built on Publifai. In the meantime, here is the review we prepared of your current site.</p><a href="/audit/">View the site review →</a></body></html>
+   ```
+4. **Call the publifai-level deploy script** from the publifai repo root (the repo that contains `clients/`):
+   ```bash
+   cd <publifai-repo-root>
+   ./scripts/deploy-client.sh <slug> <client-folder>
+   ```
+   The script runs `wrangler pages deploy` against `clients/<client-folder>/public/` on `--branch=main`. It also appends a deploy note to `client.json`.
+5. **Update client.json** (in addition to the note the script adds):
+   - `phases.B_capture.discover.audit_report.report_deployed_url` = `https://<slug>.pages.dev/audit/`
+
+The audit is now live at `https://<slug>.pages.dev/audit/`. Because `public/` is the single deploy source, future skills that add new live content (mirror, draft build, production) just drop their files into the same `public/` folder and re-run `./scripts/deploy-client.sh` — the audit keeps working automatically.
 
 ## Phase 4: Content Extraction (Output 4)
 
@@ -864,8 +894,9 @@ Site Audit Report:                     ← only if Phase 3 ran
   • Client-facing website review with PageSpeed scores
   • Desktop: Performance XX/100, Accessibility XX/100, SEO XX/100
   • Mobile:  Performance XX/100, Accessibility XX/100, SEO XX/100
-  Saved → $REPORT/site-audit.html
-  Saved → $REPORT/site-audit.pdf
+  Saved  → $REPORT/site-audit.html
+  Saved  → $REPORT/site-audit.pdf
+  Live   → https://<slug>.pages.dev/audit/
 
 Content Extracted:                     ← only if Phase 4 ran
   • 8 pages scraped (6 unique + 2 templates)
