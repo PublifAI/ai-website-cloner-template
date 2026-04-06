@@ -26,8 +26,17 @@ This file is generic — there is NOTHING client-specific in here.
 """
 import base64, json, pathlib, datetime, mimetypes, sys, html as _html
 
+import re as _re
+_ALLOWED_TAGS = ('strong', 'em', 'code', 'b', 'i')
 def esc(x):
-    return _html.escape(str(x), quote=False) if x is not None else ''
+    """HTML-escape, then unescape a small safelist of inline tags so narrative
+    bullets can still use <strong>/<em>/<code> for emphasis without letting
+    a stray <h1> blow up the layout."""
+    if x is None: return ''
+    s = _html.escape(str(x), quote=False)
+    for t in _ALLOWED_TAGS:
+        s = s.replace(f'&lt;{t}&gt;', f'<{t}>').replace(f'&lt;/{t}&gt;', f'</{t}>')
+    return s
 
 if len(sys.argv) < 2:
     print("Usage: build-report.py <client-dir>", file=sys.stderr)
