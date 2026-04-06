@@ -1,5 +1,5 @@
 ---
-description: "Discover a website's full structure via sitemap/navigation crawling, extract its design system, and pull content from re"
+description: "Discover everything deterministic about a website — sitemap, performance, SEO/GEO signals, entity data, social links, ra"
 argument-hint: "<url>"
 ---
 <!-- AUTO-GENERATED from .claude/skills/discover-site/SKILL.md — do not edit directly.
@@ -8,13 +8,22 @@ argument-hint: "<url>"
 
 # Discover Site
 
-You are about to discover and document the full structure of a website.
+You are about to discover, perceive, and report on a website. This is the required prerequisite for `/clone-website` — the cloner reads discovery outputs and does not re-fetch.
 
-This skill produces FOUR outputs that feed into the site-building process:
-1. **Site map** — every page categorized as unique or template instance
-2. **Design system** — colors, fonts, spacing, component patterns
-3. **Site audit report** — client-facing summary of findings and recommendations
-4. **Content extraction** — text, images, and structure from representative pages
+This skill has THREE phases:
+
+1. **Extract** — scripts + WebFetch + (browser only for link enumeration on SPA sites). Pulls every deterministic signal: sitemap, page list, robots.txt, per-page signals, Lighthouse/PSI, entity data, social/GBP links, raw HTML. No screenshots, no design, no narrative. Output: `audit-data.json` + `site-map.json` + `audit-pages.json` + `raw/*` + `pagespeed/*` + updates to `client.json[branding, business, assets]`.
+
+2. **Perceive** — browser + vision. Captures screenshots of every audit page (+ optional competitor homepages) and derives the design system *from the pixels*, not from scraped CSS. Cross-references the font families actually loaded (from raw HTML `<link>` tags) as a sanity check. Output: `screenshots/*.png` + updates to `client.json[design]` (the full token tree).
+
+3. **Report** — pure synthesis. Reads Phase 1 + Phase 2 outputs, writes `report/index.html`, deploys to the **root** of `<slug>.pages.dev/` so leads can be sent a clean URL. (When `/clone-website` later runs, it will move this audit to `/audit/` so the cloned site takes over the root.) No fetches, no browser, no re-computation.
+
+**Design principles:**
+1. **Compute once, read from disk.** Every artifact has exactly one producer phase; later phases read the file.
+2. **Scripts own numbers, the LLM owns narrative.** Deterministic work lives in `scripts/audit/*`; the SKILL prompt only selects, reads, and explains.
+3. **`client.json` is the cross-phase handshake.** Anything the cloner or future phases need (logo path, business name, design tokens, socials) lives in `client.json`, not scattered across `research/`.
+4. **Fail loud, not silent.** Phase 1 is the data gate. If Phase 1 can't fetch a thing, Phase 2 and Phase 3 don't get a second chance — the run halts. No retries, no fallbacks, no "capture one now" escape hatches. One exception: bot-protected sites where WebFetch 403s but a real browser works — in that case Phase 1 may capture the HTML via Phase 2's browser session at Phase 2 start time, once. That's it.
+5. **Content scraping for the rebuild lives in `/clone-website`, not here.** This skill produces signals, not builder inputs. Headings, paragraph text, template field mapping belong to clone-website's Phase 1.5.
 
 ## Pre-Flight
 
@@ -22,10 +31,10 @@ This skill produces FOUR outputs that feed into the site-building process:
 2. **Parse arguments from `$ARGUMENTS`:**
    - Extract the base URL (first non-flag argument). Normalize it (add `https://` if missing, strip trailing paths to get the domain root).
    - Check for `--client <name>` flag. If present, all output goes into a client-specific folder. If absent, fall back to repo-root paths for backward compatibility.
-   - Check for `--phases <list>` flag. If present, parse the comma-separated list of phase numbers (e.g., `--phases 1,2` or `--phases 3,4`). Only run the listed phases. If absent, run all 4 phases.
-     - Valid phase numbers: `1` (Site Map), `2` (Design System), `3` (Site Audit Report), `4` (Content Extraction).
-     - **Phase dependencies:** Phase 3 (audit report) reads outputs from Phases 1 and 2. If running Phase 3 without 1 or 2, check that the required files (`site-map.json`, `design-system.json`) already exist from a previous run. If missing, warn the user and skip Phase 3.
-     - Phase 4 (content extraction) reads the site map from Phase 1. If running Phase 4 without 1, check that `site-map.json` exists. If missing, warn the user and skip Phase 4.
+   - Check for `--phases <list>` flag. If present, parse the comma-separated list of phase numbers (e.g., `--phases 1,2` or `--phases 3`). Only run the listed phases. If absent, run all 3 phases.
+     - Valid phase numbers: `1` (Extract), `2` (Perceive), `3` (Report).
+     - **Phase dependencies:** Phase 2 reads `audit-pages.json`, `pagespeed/*.json`, `raw/homepage.raw.html`, and `audit-data.json` from Phase 1. Phase 3 reads Phase 1's `audit-data.json` + Phase 2's `client.json[design]` + `screenshots/`. Running a later phase without its prerequisites **fails the run** — no silent fallbacks. If the user runs `--phases 3` on a client that hasn't had Phase 1+2 yet, tell them to run Phase 1+2 first and stop.
+   - Check for `--competitors <url1>,<url2>,...` flag (optional). Up to 4 competitor URLs. If absent, Phase 1 Step 4.5 auto-picks from a curated category map (see below); if no map hit, the Category benchmark subsection in the Phase 3 report is skipped.
    - Check for `--force` flag. If present, re-run phases even if client.json shows them as completed.
 3. **Resolve the clients directory:**
    - Read `.env` file in the repo root for `CLIENTS_DIR`. Default: `../clients` (parent-level, shared across all Publifai tools).
@@ -54,10 +63,9 @@ This skill produces FOUR outputs that feed into the site-building process:
            "started": "<today>",
            "completed": null,
            "discover": {
-             "site_map": { "status": "pending", "completed": null },
-             "design_system": { "status": "pending", "completed": null },
-             "audit_report": { "status": "pending", "completed": null, "report_shared": null, "report_deployed_url": null },
-             "content_extraction": { "status": "pending", "completed": null }
+             "extract":  { "status": "pending", "completed": null },
+             "perceive": { "status": "pending", "completed": null },
+             "report":   { "status": "pending", "completed": null, "report_shared": null, "report_deployed_url": null }
            },
            "mirror": { "status": "pending", "deployed_url": null }
          },
@@ -87,7 +95,7 @@ This skill produces FOUR outputs that feed into the site-building process:
    | Images | `$CLIENTS_DIR/<name>/assets/images/` | `public/images/` |
    | SEO assets | `$CLIENTS_DIR/<name>/assets/seo/` | `public/images/seo/` |
    | Download script | `$CLIENTS_DIR/<name>/scripts/download-assets.mjs` | `scripts/download-assets.mjs` |
-   | Audit report (HTML) | `$CLIENTS_DIR/<name>/report/site-audit.html` | `docs/research/site-audit.html` |
+   | Audit report (HTML) | `$CLIENTS_DIR/<name>/report/index.html` | `docs/research/index.html` |
 
    Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$IMAGES`, `$SEO`, `$SCRIPTS`, and `$REPORT` as placeholders for the resolved paths.
 
@@ -101,28 +109,29 @@ This skill produces FOUR outputs that feed into the site-building process:
 
 **When a phase completes,** update the following fields (merge, don't replace):
 
-**Note:** All discovery sub-phases live under `phases.B_capture.discover.*` in the new schema. This skill executes Phase B1 (Discover) of Phase B (Capture) in the site-building process.
+**Note:** All discovery sub-phases live under `phases.B_capture.discover.*` in the new schema. This skill executes Phase B1 (Discover) of Phase B (Capture) in the site-building process. The old `content_extraction` sub-phase is **removed** — content scraping for the rebuild lives in `/clone-website`.
 
 | Phase completes | Fields to set |
 |-----------------|---------------|
-| Phase 1 (Site Map) | `phases.B_capture.discover.site_map.status` = `"completed"`, `.completed` = today, `existing_site.pages_discovered` = total count, `existing_site.pages_scraped` = pages_to_scrape, `existing_site.scraped` = `true`, `status` = `"capturing"` (if not already set), `phases.B_capture.started` = today (if not already set) |
-| Phase 2 (Design System) | `phases.B_capture.discover.design_system.status` = `"completed"`, `.completed` = today, `design.colors` = `{primary, secondary, accent}` from design-system.json, `design.fonts` = `{heading, body}` from design-system.json |
-| Phase 3 (Audit Report) | `phases.B_capture.discover.audit_report.status` = `"completed"`, `.completed` = today. After deploy step (see below), also set `.report_deployed_url` = `https://<slug>.pages.dev/audit/` |
-| Phase 4 (Content Extraction) | `phases.B_capture.discover.content_extraction.status` = `"completed"`, `.completed` = today |
+| Phase 1 (Extract) | `phases.B_capture.discover.extract.status` = `"completed"`, `.completed` = today. `existing_site.pages_discovered` = total count, `existing_site.scraped` = `true`, `status` = `"capturing"` (if not already set), `phases.B_capture.started` = today (if not already set). Set `branding.business_name` (from homepage `<title>`) + `branding.business_name_source`. Copy `audit-data.social.found_via_links` into `business.socials` (merge). Set `assets.favicon_path` if downloaded. |
+| Phase 2 (Perceive) | `phases.B_capture.discover.perceive.status` = `"completed"`, `.completed` = today. **`design` = full extracted token tree derived from screenshots** — merge into `client.json[design]` (read-modify-write, preserve human edits like `design.vibe` set during Phase C). Set `branding.logo_path` (if logo was downloaded in Phase 1), `branding.logo_source = "scraped"`. Upgrade `branding.business_name` via logo alt if current source is `domain_fallback`. |
+| Phase 3 (Report) | `phases.B_capture.discover.report.status` = `"completed"`, `.completed` = today. After deploy step (below), also set `.report_deployed_url` = `https://<slug>.pages.dev/` (root — clone will later move it to `/audit/`). |
 
 **When ALL requested phases are done:**
 - Set `updated` = today
-- Discover is complete only when all 4 sub-phases are `"completed"`. Phase B itself (`phases.B_capture.completed`) is set by `/clone-website` + mirror deploy, not here.
+- Discover is complete only when all 3 sub-phases are `"completed"`. Phase B itself (`phases.B_capture.completed`) is set by `/clone-website` + mirror deploy, not here.
 
 **When a phase is skipped** (via `--phases` flag): leave its status as-is.
 
 **Always** set `updated` = today on any write.
 
-## Phase 1: Site Map Discovery (Output 1)
+## Phase 1: Extract
 
 **Skip this phase if `--phases` was provided and `1` is not in the list.**
 
-Goal: Discover ALL pages on the site and categorize them.
+Goal: capture every deterministic signal about the site. Scripts do the heavy lifting; this phase is deliberately headless-first. Browser is only used for link enumeration on SPA/CSR sites where WebFetch returns an empty shell — **never for screenshots** (those belong to Phase 2). Phase 1 ends with `audit-data.json`, `site-map.json`, `audit-pages.json`, raw HTML cached per audit page, PSI JSON per audit page, and `client.json` updated with branding + socials.
+
+**Phase 1 is the data gate.** If a required fetch fails here, Phase 2 and Phase 3 do not paper over it — the run halts.
 
 ### Step 1: Try Sitemap
 
@@ -130,7 +139,9 @@ Goal: Discover ALL pages on the site and categorize them.
 2. If not found, try `<base-url>/sitemap_index.xml`
 3. If a sitemap index is found, fetch each child sitemap listed in it
 4. Parse all `<loc>` URLs from the sitemap(s)
-5. If no sitemap exists, fall back to Step 2
+5. **Also save raw sitemap XML** to `$RESEARCH/raw/sitemap.xml` (so Phase 3's `gather-audit-data.mjs` can reuse it without refetching).
+6. **Fetch `<base-url>/robots.txt`** via WebFetch and save the raw body to `$RESEARCH/raw/robots.txt`. This is the single source of truth for robots.txt across all phases — `gather-audit-data.mjs` short-circuits its own fetch if this file exists.
+7. If no sitemap exists, fall back to Step 2
 
 ### Step 2: Navigation Crawling (fallback or supplement)
 
@@ -143,9 +154,11 @@ If no sitemap, or if the sitemap seems incomplete:
    - Sidebar menus
    - Body content links
 3. For each discovered page, visit it and extract any NEW internal links not yet seen
-4. **Depth limit: 2 levels** from homepage (homepage → linked page → linked from that page)
-5. **Page limit: never discover more than 200 URLs** — stop crawling when you hit this
-6. Deduplicate URLs (strip query params, anchors, trailing slashes for comparison)
+4. **While the page is loaded, also dump rendered HTML to `$RESEARCH/raw/<slug>.html`** (slug = URL path normalized with `/` replaced by `-`, empty path = `homepage`). This is best-effort: crawl is primary, raw dump is a side effect.
+5. **Also do a second un-rendered WebFetch with a desktop browser UA** and save the response body to `$RESEARCH/raw/<slug>.raw.html`. This is what `extract-page-signals.mjs` uses for SSR vs CSR ratio — it must be the server response, not the hydrated DOM.
+6. **Depth limit: 2 levels** from homepage (homepage → linked page → linked from that page)
+7. **Page limit: never discover more than 200 URLs** — stop crawling when you hit this
+8. Deduplicate URLs (strip query params, anchors, trailing slashes for comparison)
 
 ### Step 3: Categorize Pages
 
@@ -218,113 +231,219 @@ Save to `$RESEARCH/site-map.json`:
 }
 ```
 
-**Print a summary table** to the user after saving, showing unique pages and template groups with counts. Ask the user to confirm before proceeding to Phase 2. They may want to adjust categorization or skip certain pages.
+### Step 4.5: Pick Competitors
 
-## Phase 2: Design System Extraction (Output 2)
+Competitor homepages power the Design → Category benchmark subsection in the Phase 3 report. Decision tree:
 
-**Skip this phase if `--phases` was provided and `2` is not in the list.**
+1. **If `--competitors <url1>,<url2>,...` was passed** → use those URLs (up to 4). Source = `"flag"`.
+2. **Else auto-pick from a curated category map:**
+   - Read `business.type` from `client.json` if set. Otherwise infer by keyword-matching the homepage `<title>` + any JSON-LD `@type` on the homepage against the map's keys (case-insensitive): "gallery" → `art_gallery`, "restaurant" / "cafe" → `restaurant_india`, "boutique" / "fashion" → `boutique_fashion`, "clinic" / "hospital" → `clinic_india`, "salon" / "spa" → `salon_india`, "hotel" / "resort" → `hotel_india`, "school" / "academy" → `school_india`, "law" / "legal" / "advocate" → `law_firm_india`.
+   - Look up the curated exemplars (2 picks) from this map:
+     ```yaml
+     art_gallery:      [https://gagosian.com, https://www.davidzwirner.com]
+     restaurant_india: [https://thebombaycanteen.com, https://indianaccent.com]
+     boutique_fashion: [https://www.nicobar.com, https://www.goodearth.in]
+     clinic_india:     [https://www.apollohospitals.com, https://www.fortishealthcare.com]
+     salon_india:      [https://www.lakmesalon.in, https://www.enrichsalon.com]
+     hotel_india:      [https://www.tajhotels.com, https://www.theleela.com]
+     school_india:     [https://www.dpsrkpuram.com, https://www.modernschool.net]
+     law_firm_india:   [https://www.azbpartners.com, https://www.trilegal.com]
+     ```
+   - Source = `"auto"`.
+3. **No map hit** → skip competitors entirely. Source = `"none"`, `urls = []`. Phase 3's Category benchmark subsection will not render.
 
-Goal: Extract the visual design language from 2-3 key pages.
+Write the result to `$RESEARCH/competitors.json`:
 
-### Pages to Inspect
+```json
+{ "source": "flag | auto | none", "urls": ["https://...", "https://..."] }
+```
 
-- The homepage (always)
-- 1-2 other pages with distinct layouts (e.g., a content page and a listing/gallery page)
-- Do NOT inspect every page — the design system should be derivable from a few pages
+Also write it to `client.json[phases.B_capture.discover.competitors] = { source, urls }`.
 
-### What to Extract
+### Step 5: Compute and Persist the Canonical Audit Page List
 
-Use browser MCP to navigate to each page and run JavaScript extraction.
+Right after writing `site-map.json`, compute the **canonical list of pages that every downstream phase will use** for screenshots, PSI, signal extraction, and content scraping. Write it to `$RESEARCH/audit-pages.json`:
 
-**Colors** — Use a **multi-layered approach** to get the real brand palette, not CMS defaults:
-
-1. **Fetch and parse the theme stylesheet.** Find the site's theme/custom CSS file URL (look for `<link rel="stylesheet">` pointing to the theme directory — e.g., `/wp-content/themes/*/style.css`, or the main CSS bundle for non-WordPress sites). Fetch it via WebFetch and extract all color values (hex, rgb, rgba, hsl). This gives you the *intentionally chosen* colors, not framework defaults.
-
-2. **Run frequency-based color sampling via JavaScript.** Execute a script that iterates over all visible elements on the page, calls `getComputedStyle()` for `color`, `backgroundColor`, `borderColor`, and tallies each unique color value with a usage count. Rank by frequency. The top 10-15 most-used colors are the real palette. Ignore colors used fewer than 3 times (likely one-off overrides).
-
-3. **Filter out known CMS/framework defaults.** Discard colors that are standard WordPress, WooCommerce, Bootstrap, or browser defaults:
-   - WordPress admin colors: `#007cba`, `#006ba1`, `#005a87` (these are `--wp-admin-theme-color` variants)
-   - WordPress block editor palette: `#7a00df`, `#cf2e2e`, `#ff6900`, `#fcb900`, `#7bdcb5`, `#00d084`, `#8ed1fc`, `#0693e3`, `#abb8c3`, `#313131` (only if it appears ONLY in `.has-*-color` classes and not in the theme CSS)
-   - WordPress block gradients (vivid-cyan-blue, luminous-vivid-orange, etc.)
-   - Default browser colors: `rgb(0, 0, 0)`, `rgb(255, 255, 255)` (keep these only if theme CSS explicitly sets them)
-   - Bootstrap defaults: `#0d6efd`, `#6c757d`, `#198754`, `#dc3545`, `#ffc107`, `#0dcaf0`
-
-4. **Sample specific semantic elements.** After the frequency scan, also specifically extract colors from:
-   - The `<header>` / `<nav>` background and text
-   - The `<footer>` background and text
-   - Primary CTA buttons (the first prominent `<a>` or `<button>` with a background color)
-   - Link colors (find an `<a>` in body text and get its computed color)
-   - Hero/banner section background
-   - Card or product listing backgrounds and borders
-
-5. **Cross-reference.** Compare the theme CSS colors with the frequency-sampled colors. Colors that appear in BOTH the theme CSS AND the rendered page with high frequency are the true brand colors. Colors only in CMS defaults should be excluded.
-
-6. **Classify.** From the validated colors, determine:
-   - **Primary** — the dominant brand color (most prominent in header, buttons, accents)
-   - **Secondary** — supporting brand color
-   - **Accent** — highlight/CTA color
-   - **Background/foreground/muted/border** — structural colors
-
-   Store both the classified palette AND the raw frequency data so the cloner has full context.
-
-**Typography** — Extract from computed styles:
-- Font families (heading font, body font, any special fonts)
-- Font sizes for h1, h2, h3, h4, h5, h6, body, small, caption
-- Font weights used
-- Line heights
-- Letter spacing values
-- Text transforms (uppercase headings, etc.)
-
-**Spacing** — Identify the spacing scale:
-- Section padding (top/bottom)
-- Container max-width and padding
-- Card padding
-- Gap between grid items
-- Margin patterns
-
-**Layout** — Extract structural patterns:
-- Page max-width
-- Grid column counts at different breakpoints
-- Sidebar widths (if any)
-- Header height
-- Footer structure
-
-**Components** — Document the patterns for:
-- Buttons (primary, secondary, outline — padding, border-radius, font)
-- Cards (shadow, border, radius, padding)
-- Navigation (desktop + mobile patterns)
-- Footer (columns, background, text style)
-- Forms (input styling, labels)
-- Links (color, decoration, hover state)
-
-**Decorative** — Note:
-- Border radius values used
-- Box shadow patterns
-- Gradient usage
-- Opacity patterns
-- Transition/animation patterns
-
-### Take Screenshots
-
-- Homepage at 1440px, 768px, 390px
-- 1-2 other pages at 1440px
-- Save to `$SCREENSHOTS/`
-
-### Download Global Assets
-
-1. Find and download all images referenced on scraped pages to `$IMAGES/`
-2. **Download the site's real logo to `$IMAGES/logo.<ext>`** — locate the logo by inspecting the header: look for an `<img>` inside a `.logo`, `#logo`, `header .navbar-brand`, `.site-logo`, or similar container, or the first `<img>` inside `<header>` whose `src`/`alt` contains "logo". Download the actual file from the live site (preserving its original extension: `.png`, `.svg`, `.jpg`, or `.webp`) and save it as `$IMAGES/logo.<ext>`. Also set `assets.logo` in `design-system.json` to this relative path. **Never generate, draw, or synthesize a logo** — if no logo image can be found on the site, leave `assets.logo` as `null` and do not create a placeholder file.
-3. Download favicon, apple-touch-icon, OG images to `$SEO/`
-4. Note any external fonts (Google Fonts URLs, self-hosted font files)
-
-Write and run a `$SCRIPTS/download-assets.mjs` script for batch downloading (4 concurrent).
-
-### Output Design System
-
-Save to `$RESEARCH/design-system.json`:
+Selection rule (runs here, once):
+- **Homepage** (always, `role: "homepage"`)
+- **One interior content page** — most important non-homepage unique page. Priority: About > Services > first entry in main navigation. Role: `"interior"`.
+- **One template instance** — `example_url` from the largest template group (by `total_count`), if any template groups exist. Role: `"template_example"`.
 
 ```json
 {
+  "pages": [
+    { "slug": "homepage",        "url": "https://example.com/",            "role": "homepage" },
+    { "slug": "about",           "url": "https://example.com/about/",      "role": "interior" },
+    { "slug": "product-example", "url": "https://example.com/product/foo", "role": "template_example", "template_group": "Product Page" }
+  ]
+}
+```
+
+All subsequent work — Phase 2 screenshots, PSI calls, `gather-audit-data.mjs`, and downstream `/clone-website` content scraping — **reads from this file**. No phase recomputes the list.
+
+### Step 6: Derive Business Name Into `client.json`
+
+Read the homepage `<title>` tag from `$RESEARCH/raw/homepage.raw.html`. Strip common suffixes like "| Home", "— Official Site", "- Gallery". Set `client.json[branding][business_name]` and `branding.business_name_source = "title_tag"`. If the title is empty or unparseable, fall back to the title-cased domain and set `business_name_source = "domain_fallback"`.
+
+### Step 7: Count Site-Wide Alt Coverage During Crawl
+
+While the navigation crawl is still in flight (or as a second pass over `$RESEARCH/raw/<slug>.html` files), count every `<img>` tag and every `<img>` with a non-empty `alt` attribute. Aggregate into a single `site_wide_alt_coverage = { total_images, images_with_alt, coverage_pct }` object and **write it into `$RESEARCH/site-map.json` as a top-level field** — `gather-audit-data.mjs` reads it from there. (This replaces the old Phase-4 content-dir scan that `gather-audit-data.mjs` used to do.)
+
+### Step 8: Download Site Assets (Logo + Favicon + OG)
+
+Download the minimum set of assets the audit report needs:
+- **Logo** — locate via `<img>` inside `.logo`, `#logo`, `header .navbar-brand`, `.site-logo`, or the first `<img>` inside `<header>` whose `src`/`alt` contains "logo". Download to `$IMAGES/logo.<ext>` (preserve original extension: `.png`, `.svg`, `.jpg`, `.webp`). Capture its `alt` attribute. **Never generate, draw, or synthesize a logo.** If no logo is found, leave it unset.
+- **Favicon + apple-touch-icon** — download from `<link rel="icon">` / `<link rel="apple-touch-icon">` in the homepage HTML. Save to `$SEO/favicon.ico` and `$SEO/apple-touch-icon.png`.
+- **OG image** — download the homepage `og:image` to `$SEO/og-image.<ext>` for the share-preview mockup in the report.
+
+Do **not** download every image on every page here — that's a rebuild concern and belongs to `/clone-website`'s content scrape. Phase 1 only grabs the assets the audit report itself needs to render.
+
+Update `client.json[branding][logo_path]`, `branding.logo_source`, and `assets.favicon_path`. If the logo alt text is clearly the business name and `branding.business_name_source` is currently `"domain_fallback"`, upgrade `branding.business_name` to the alt text and set `business_name_source = "logo_alt"`.
+
+### Step 9: Fetch PageSpeed Insights For Every Audit Page
+
+For each page in `$RESEARCH/audit-pages.json`, call the Google PSI API twice (mobile + desktop). Run in parallel where possible.
+
+Read `PSI_API_KEY` from the repo's `.env`. If missing, **stop** and tell the user to set it — the unauthenticated endpoint's shared quota is almost always exhausted. No fallback.
+
+```
+https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=<PAGE_URL>&strategy=<mobile|desktop>&category=performance&category=accessibility&category=seo&key=$PSI_API_KEY
+```
+
+Save raw responses to `$RESEARCH/pagespeed/<slug>-<strategy>.json`. Do not parse them here — `extract-lighthouse.mjs` does that inside `gather-audit-data.mjs`.
+
+If a PSI call fails (timeout, 500, site unreachable), write a stub JSON with `{ "error": "..." }` so the gatherer knows the page was attempted but failed. This is the **one acceptable partial state** — because a single PSI fail shouldn't kill the run, but it must be visible in downstream output.
+
+### Step 10: Run the Audit-Data Gathering Script
+
+Every deterministic per-page check — SEO signals, AI-crawler robots/llms.txt, Lighthouse score extraction, social/GBP link parsing, entity signals, favicon inspection, derived metrics — runs through a single script. Do **not** re-implement any of this in the SKILL prompt.
+
+```bash
+node scripts/audit/gather-audit-data.mjs $CLIENTS_DIR/<name>
+```
+
+It reads:
+- `$RESEARCH/audit-pages.json` (canonical page list)
+- `$RESEARCH/raw/<slug>.raw.html` (preferred) or `<slug>.html` (fallback) for per-page signal extraction
+- `$RESEARCH/raw/robots.txt`, `$RESEARCH/raw/sitemap.xml` (cached, not refetched)
+- `$RESEARCH/pagespeed/<slug>-<strategy>.json` (written in Step 9)
+- `$RESEARCH/raw/homepage.raw.html` for social link extraction (via `extract-social-links.mjs`)
+- `$RESEARCH/raw/homepage.raw.html` + about page (if any) for entity signals (via `extract-entity-signals.mjs`) — founding date, address, opening hours, `sameAs`, named founder
+- `$SEO/favicon.ico`, `$SEO/apple-touch-icon.png` on disk (pure inspection)
+
+It writes `$RESEARCH/audit-data.json` containing:
+- `audited_pages[]` — per-page signals + lighthouse + entity_signals
+- `robots` — AI crawler access matrix
+- `llms_txt`, `llms_full_txt` — presence checks
+- `social` — homepage social/GBP/directory links
+- `favicon` — disk inspection result
+- `derived` — headline metrics, quick wins, `site_wide_alt_coverage`
+
+Helper scripts (runnable individually for debugging):
+- `scripts/audit/extract-page-signals.mjs <html-file> <url>` — per-page SEO signals
+- `scripts/audit/extract-entity-signals.mjs <html-file>` — founding date, address, hours, sameAs, founder
+- `scripts/audit/extract-social-links.mjs <html-file>` — social/GBP/directory links
+- `scripts/audit/analyze-robots.mjs <robots.txt>` — AI crawler matrix
+- `scripts/audit/extract-lighthouse.mjs <psi.json>` — scores, CWV, opportunities, derived metrics
+
+**Print a summary table** to the user showing unique pages, template groups, PSI scores, and quick-wins count. Phase 1 is complete — nothing fetched in Phase 2 or Phase 3 will re-do any of this work.
+
+## Phase 2: Perceive
+
+**Skip this phase if `--phases` was provided and `2` is not in the list.**
+**Requires Phase 1 outputs:** `audit-pages.json`, `raw/homepage.raw.html`, and a populated `client.json[branding]`. If Phase 1 didn't run, fail — don't try to run Phase 1 inline.
+
+Goal: capture screenshots of every audit page at every viewport, then use a **vision model to derive the design system from the pixels** — not from scraped CSS. Also (optionally) shoot competitor homepages for a visual comparison paragraph in the audit.
+
+This phase **kills the old multi-layered color-scraping pipeline** (theme CSS parse + frequency sampling + WordPress-defaults filter + semantic-element sampling + cross-reference + classification). All of that is replaced by "look at the picture and tell me the palette."
+
+### Step 0: Screenshot Pre-Flight (HARD GATE)
+
+Before anything else in Phase 2, **prove that browser MCP can actually capture a screenshot of the live site.**
+
+1. Navigate to the homepage at 1440px using browser MCP.
+2. Attempt a full-page screenshot and save to `$SCREENSHOTS/homepage-desktop.png`.
+3. Verify the file exists and is > 10KB.
+
+**If the screenshot fails** (browser MCP not connected, navigation error, blocked by Cloudflare/bot protection, blank image, file < 10KB): **STOP Phase 2 immediately.** Report the failure and ask the user how to proceed. **Never fall back to a screenshot-less design system.**
+
+(This is the only place in the run that uses a browser for visual capture. Phase 1's browser use — if any — was for link enumeration only.)
+
+### Step 1: Capture All Audit-Page Screenshots
+
+For **every page in `$RESEARCH/audit-pages.json`**, capture and save to `$SCREENSHOTS/`:
+
+- `<slug>-desktop.png` at 1440px (full page)
+- `<slug>-mobile.png` at 390px (full page)
+- Plus one extra pass **only for the homepage**: `homepage-tablet.png` at 768px (for design-system perception).
+
+**Skip-if-exists rule:** If a file already exists and is > 10KB, reuse it. This auto-preserves `homepage-desktop.png` from Step 0.
+
+After each new capture, verify the file exists and is > 10KB. Any failure → stop Phase 2.
+
+Expected total file count: `2 × len(audit-pages) + 1`.
+
+### Step 2: Capture Competitor Homepages
+
+Read `$RESEARCH/competitors.json` (written in Phase 1 Step 4.5). If `urls` is empty (`source: "none"`), skip this step entirely — the Phase 3 report's Category benchmark subsection will not render.
+
+Otherwise, for each competitor URL (max 4):
+1. Navigate to the URL at 1440px and capture `$SCREENSHOTS/competitors/<domain>-desktop.png` (full page).
+2. Navigate at 390px and capture `$SCREENSHOTS/competitors/<domain>-mobile.png`.
+3. Verify each screenshot > 10KB; log a warning and skip the competitor on failure — do not halt Phase 2.
+
+Then run a **single vision LLM pass per competitor** on their desktop screenshot and produce:
+- `design_language`: 1-2 sentence description of the visual style (palette, type, layout archetype)
+- `does_well`: one-line "what they do well" observation (e.g., "full-bleed hero with a single CTA, no visual noise")
+
+Write the results as `derived.competitor_design[]` into `$RESEARCH/audit-data.json` via read-modify-write:
+
+```json
+{
+  "derived": {
+    "competitor_design": [
+      {
+        "url": "https://gagosian.com",
+        "domain": "gagosian.com",
+        "desktop_screenshot": "$SCREENSHOTS/competitors/gagosian.com-desktop.png",
+        "mobile_screenshot": "$SCREENSHOTS/competitors/gagosian.com-mobile.png",
+        "design_language": "Editorial minimalism — white background, black serif wordmark, full-bleed exhibition photography, zero gradients.",
+        "does_well": "Lets the artwork breathe: one image per fold, no competing CTAs."
+      }
+    ]
+  }
+}
+```
+
+Do **not** crawl competitors. Do **not** run Lighthouse. Do **not** extract their design tokens into `client.json[design]`. These shots exist only for the Phase 3 Category benchmark subsection.
+
+### Step 3: Derive the Design System From Screenshots (Vision LLM)
+
+Using `$SCREENSHOTS/homepage-desktop.png`, `homepage-tablet.png`, and `homepage-mobile.png` as the primary input (plus the interior + template pages as reference for non-homepage patterns), describe the design system. This is a **vision task** — look at the pixels.
+
+Extract, in order:
+
+1. **Color palette** — primary, secondary, accent, background, foreground, muted, border, footer_bg, footer_text, link, link_hover, button_bg, button_text, button_hover_bg. Report exact hex values. Sample from the actual pixels where possible (e.g., header background, CTA button fill).
+2. **Typography** — heading font family, body font family, perceived weights, relative size hierarchy. **Cross-reference:** read `$RESEARCH/raw/homepage.raw.html` for `<link rel="stylesheet" href="...fonts.googleapis.com/css2?family=...">` entries — these are the *actually loaded* font families and should match what your eyes see. If vision disagrees with `<link>` tags, trust the `<link>` tags for the family names and your eyes for the pairing/usage.
+3. **Spacing rhythm** — perceived section padding, container width, card padding, grid gap.
+4. **Layout archetype** — max-width-container vs full-bleed, sidebar vs no sidebar, header height, footer column count, grid columns at desktop/tablet/mobile.
+5. **Component patterns** — button shape/radius/padding, card shadow/border/radius, navbar style, input style.
+6. **Decorative signatures** — border-radius scale, shadow usage (subtle vs dramatic vs none), gradient usage, transition feel.
+7. **Vibe** — a single short phrase. "warm traditional", "modern minimal", "bold colorful", "editorial sophisticated", "playful indie", etc.
+
+**Brand color cross-reference (optional, deterministic):** if a logo file exists at `client.json[branding][logo_path]`, sample the dominant non-white/non-black pixel colors from the logo — these are usually the brand's true primary + secondary. Note any disagreement with the vision-derived palette.
+
+### Step 4: Write the Design Tree Into `client.json[design]`
+
+**Do NOT write `research/design-system.json` — that file is deprecated.** Read `client.json`, merge the derived design tree into `client.json[design]` via read-modify-write. Preserve any fields a human may have edited (e.g., `design.vibe` set during Phase C).
+
+`design.colors.primary/secondary/accent` and `design.typography.fonts.heading/body` must be present at those exact paths so `client-status.sh` and downstream tooling keep working unchanged.
+
+The full `design` subtree shape:
+
+```json
+{
+  "vibe": "warm traditional",
   "colors": {
     "primary": "#313131",
     "secondary": "#eeeeee",
@@ -342,17 +461,12 @@ Save to `$RESEARCH/design-system.json`:
     "button_hover_bg": "#007cba"
   },
   "typography": {
-    "heading_font": "Playfair Display, serif",
-    "body_font": "Open Sans, sans-serif",
+    "fonts": { "heading": "Playfair Display", "body": "Open Sans" },
     "google_fonts_url": "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Open+Sans:wght@300;400;600;700&display=swap",
     "sizes": {
       "h1": { "size": "42px", "weight": "700", "line_height": "1.2" },
       "h2": { "size": "32px", "weight": "700", "line_height": "1.3" },
-      "h3": { "size": "24px", "weight": "700", "line_height": "1.4" },
-      "h4": { "size": "20px", "weight": "600", "line_height": "1.4" },
-      "body": { "size": "14px", "weight": "400", "line_height": "24px" },
-      "small": { "size": "13px", "weight": "400", "line_height": "20px" },
-      "nav": { "size": "14px", "weight": "600", "line_height": "1", "transform": "uppercase", "letter_spacing": "1px" }
+      "body": { "size": "14px", "weight": "400", "line_height": "24px" }
     }
   },
   "spacing": {
@@ -360,8 +474,7 @@ Save to `$RESEARCH/design-system.json`:
     "container_max_width": "1200px",
     "container_padding_x": "20px",
     "card_padding": "10px",
-    "grid_gap": "20px",
-    "heading_margin_bottom": "20px"
+    "grid_gap": "20px"
   },
   "layout": {
     "max_width": "1200px",
@@ -372,101 +485,60 @@ Save to `$RESEARCH/design-system.json`:
     "grid_columns_mobile": 1
   },
   "components": {
-    "button": {
-      "padding": "8px 18px",
-      "border_radius": "0",
-      "font_size": "13px",
-      "font_weight": "600",
-      "text_transform": "uppercase",
-      "letter_spacing": "0.5px"
-    },
-    "card": {
-      "border": "1px solid #eeeeee",
-      "border_radius": "0",
-      "box_shadow": "none",
-      "padding": "10px"
-    },
-    "input": {
-      "border": "1px solid #dddddd",
-      "border_radius": "4px",
-      "padding": "10px 16px",
-      "font_size": "14px"
-    }
+    "button": { "padding": "8px 18px", "border_radius": "0", "font_weight": "600", "text_transform": "uppercase" },
+    "card":   { "border": "1px solid #eeeeee", "border_radius": "0", "box_shadow": "none", "padding": "10px" },
+    "input":  { "border": "1px solid #dddddd", "border_radius": "4px", "padding": "10px 16px" },
+    "navbar": { "height": "90px", "background": "#ffffff" }
   },
-  "decorative": {
-    "border_radius": {
-      "none": "0",
-      "small": "4px",
-      "full": "9999px"
-    },
-    "shadows": {
-      "dropdown": "0 5px 15px rgba(0,0,0,0.1)"
-    },
-    "transitions": {
-      "default": "0.3s ease"
-    }
-  },
-  "assets": {
-    "logo": "public/images/logo.png",
-    "favicon": "public/images/seo/favicon.ico",
-    "images_downloaded": 16
-  }
+  "radius": { "none": "0", "small": "4px", "full": "9999px" },
+  "shadows": { "dropdown": "0 5px 15px rgba(0,0,0,0.1)" },
+  "transitions": { "default": "0.3s ease" }
 }
 ```
 
-## Phase 3: Site Audit Report (Output 3)
+**Why this subtree is powerful:** it's both (a) the source of truth the cloner reads to generate `tailwind.config.js`, and (b) the starting point for the Phase C design conversation with the client — "here's what you have today, here are three directions we could take it." Same data, two consumers.
+
+## Phase 3: Report
 
 **Skip this phase if `--phases` was provided and `3` is not in the list.**
-**Requires:** `$RESEARCH/site-map.json` (Phase 1) and `$RESEARCH/design-system.json` (Phase 2). If either file is missing, warn the user and skip this phase.
+**Requires Phase 1 + Phase 2 outputs.** No fetches, no browser, no re-computation — this phase reads everything and synthesizes the report. If any required input is missing, fail — don't try to generate the missing data here.
+
+Required inputs:
+- `$RESEARCH/audit-data.json` (Phase 1)
+- `$RESEARCH/site-map.json` (Phase 1)
+- `$RESEARCH/audit-pages.json` (Phase 1)
+- `$RESEARCH/pagespeed/*.json` (Phase 1, for raw opportunities if needed)
+- `$SCREENSHOTS/*.png` (Phase 2)
+- `client.json[design, branding, business, assets]` (Phase 1 + Phase 2)
 
 Goal: Generate a polished, client-facing audit report as a self-contained, styled HTML file. Written for a non-technical small business owner — no jargon, friendly professional tone.
 
-### Determine the Business Name
+### Business Name
 
-Look for the business name in this order:
-1. The site's `<title>` tag or OG title (strip suffixes like "| Home", "— Official Site")
-2. The logo alt text
-3. The domain name, title-cased (e.g., "galleryoneindia.com" → "Gallery One India")
-
-Use this business name throughout the report.
+Read `client.json[branding][business_name]`. It was set by Phase 1 (and possibly upgraded by Phase 2 via logo alt). If somehow null (shouldn't happen after Phase 1), fall back to the 3-step derivation (title → logo alt → title-cased domain) and write the result back to `client.json`.
 
 ### Gather Data
 
 Read the outputs from Phase 1 and Phase 2:
 - `$RESEARCH/site-map.json` — page counts, unique pages, template groups
-- `$RESEARCH/design-system.json` — colors, fonts, layout, components
-- Screenshots from `$SCREENSHOTS/` — embed them in the report
+- `$RESEARCH/audit-pages.json` — canonical list of pages to deep-dive on
+- `client.json[design]` — full design tree (colors, fonts, layout, components)
+- `client.json[branding]` — business name + logo path
+- Screenshots from `$SCREENSHOTS/` — embed them in the report (already captured by Phase 2 for every page in `audit-pages.json`)
 
 #### Locate Client Logo and Homepage Screenshot
 
-1. **Client logo** — Find an **existing** logo file that was downloaded during Phase 2. Check in order:
-   - `$IMAGES/logo.png`
-   - `$IMAGES/logo.jpg`, `$IMAGES/logo.svg`, `$IMAGES/logo.webp`
-   - `$SEO/logo.png`
-   - The `assets.logo` path from `design-system.json`
+1. **Client logo** — Read `client.json[branding][logo_path]`. If set, resolve it relative to the client folder and base64-encode the file for embedding in the report header. If `null`, fall back to scanning `$IMAGES/` for `logo.{png,jpg,svg,webp}`. If nothing is found, omit the logo from the report entirely — do not fabricate one.
 
-   If found, read the file and base64-encode it for embedding in the report header.
+   **DO NOT create, generate, synthesize, or draw a logo under any circumstances.** Never write a logo file, never use an SVG placeholder, never fabricate one from the business name. Setting the logo is Phase 2's job, not Phase 3's.
 
-   **DO NOT create, generate, synthesize, or draw a logo under any circumstances.** Never write a logo file, never use an SVG placeholder, never fabricate one from the business name. If no logo file exists in the locations above, omit the logo from the report entirely — the header should just show the business name and domain. Setting the logo is Phase 2's job (via `Explore`/asset download), not Phase 3's.
-
-2. **Homepage screenshot** — You MUST embed an actual screenshot of the client's live homepage. Look for it in `$SCREENSHOTS/` in this order:
-   - `$SCREENSHOTS/homepage-desktop.png`
-   - `$SCREENSHOTS/homepage-mobile.png`
-   - Any file in `$SCREENSHOTS/` matching `*homepage*` or `*home*`
-
-   If no homepage screenshot exists in `$SCREENSHOTS/`, **capture one now** using browser MCP against the live site (1440px desktop viewport, full-page) and save it to `$SCREENSHOTS/homepage-desktop.png` before embedding. **Never fall back to a repo asset, README image, placeholder, or any file outside `$SCREENSHOTS/`.** The embedded image must be a real rendering of the client's actual homepage.
+2. **Homepage screenshot** — Read `$SCREENSHOTS/homepage-desktop.png`. This file is guaranteed by Phase 1 Step 0's hard gate and confirmed by Phase 2's unified capture. If it's somehow missing, **fail Phase 3** rather than re-capture — its absence means a critical invariant was broken and should be diagnosed, not papered over.
 
 3. **Client domain** — Extract from `base_url` in `site-map.json` (e.g., `www.galleryoneindia.com`). Display prominently in the report header alongside the business name.
 
-#### Select Audit Pages
+#### Audit Pages
 
-Pick **2-3 pages** to audit in depth. These pages get individual PageSpeed scores, screenshots, and SEO checks:
-
-1. **Homepage** (always) — the front door
-2. **One interior content page** — pick the most important non-homepage page (e.g., About, Services, or a key product/listing page). Prefer a page with distinct layout from the homepage.
-3. **One template instance** (optional, if the site has template groups) — pick the `example_url` from the most important template group (e.g., a product page, artist profile, or blog post)
-
-Store the selected page URLs as `$AUDIT_PAGES` (list of 2-3 full URLs). Use these consistently for PageSpeed, screenshots, and SEO checks below.
+Read `$RESEARCH/audit-pages.json` — the canonical list was computed in Phase 1 Step 5. Use it as-is for PageSpeed, signal extraction, and report rendering. Do not recompute the list.
 
 #### Google PageSpeed Insights
 
@@ -499,124 +571,154 @@ Save the raw PageSpeed responses to `$RESEARCH/pagespeed/` — one file per page
 
 #### Screenshots
 
-Take screenshots of **each page in `$AUDIT_PAGES`** using browser MCP. For each page:
+Screenshots for every page in `audit-pages.json` at both desktop (1440px) and mobile (390px) viewports already exist in `$SCREENSHOTS/` — they were captured once by Phase 2 using canonical slugs. Phase 3 **reads** these files and base64-embeds them in the report. No re-capture.
 
-- **Desktop** at 1440px viewport width (full-page screenshot if possible, otherwise above-the-fold)
-- **Mobile** at 390px viewport width
+#### Run the audit-data gathering script
 
-Save to `$SCREENSHOTS/` with descriptive names:
-- `homepage-desktop.png`, `homepage-mobile.png`
-- `[slug]-desktop.png`, `[slug]-mobile.png`
+**Every deterministic check (per-page SEO, Lighthouse numbers, AI crawler robots.txt, llms.txt probe, derived metrics) is handled by a single permanent script — do NOT re-implement these inline.**
 
-These screenshots will be base64-embedded in the HTML report, so each audited page gets its own visual in the report.
+```bash
+node scripts/audit/gather-audit-data.mjs $CLIENTS_DIR/<name>
+```
 
-#### Numeric Findings Extraction (from Lighthouse)
+Optional flag: `--pages=<url1>,<url2>,<url3>` to override which pages are audited. By default the script reads `$RESEARCH/audit-pages.json`. **Before running the gatherer, make sure the PSI files for every page in `audit-pages.json` exist** in `$RESEARCH/pagespeed/` (named `<slug>-mobile.json` / `<slug>-desktop.json`) — call PageSpeed Insights first if not.
 
-**Every finding in this report must be numeric, not adjectival.** For each page in `$AUDIT_PAGES`, open the saved PageSpeed JSON and extract the concrete numbers below. Store them in memory as you go — they drive the Hero Stat Strip and all "Findings" bullets.
+The script short-circuits its own fetches when Phase 1 has already cached the data:
+- `$RESEARCH/raw/robots.txt` — reused if present (Phase 1 writes this)
+- `$RESEARCH/raw/sitemap.xml` — reused if present
+- `$RESEARCH/raw/<slug>.raw.html` — reused for signal extraction if present (preferred — it's the unrendered server response, correct for SSR ratio)
+- `$RESEARCH/raw/<slug>.html` — fallback if `.raw.html` is missing
 
-From `lighthouseResult.audits` pull (mobile response preferred, fall back to desktop):
-- **`total-byte-weight`** — `numericValue` in bytes → convert to MB. This is today's page payload.
-- **`uses-optimized-images`** — `details.overallSavingsBytes` → MB saved if images were compressed properly.
-- **`uses-responsive-images`** — `details.overallSavingsBytes` → additional MB saved by right-sizing.
-- **`modern-image-formats`** — `details.overallSavingsBytes` → MB saved by WebP/AVIF.
-- **`offscreen-images`** — `details.overallSavingsBytes` → MB saved by lazy-loading.
-- **`unused-css-rules`** — `details.overallSavingsBytes` → KB saved.
-- **`unused-javascript`** — `details.overallSavingsBytes` → KB saved.
-- **`render-blocking-resources`** — `details.overallSavingsMs` → ms saved.
-- **`tap-targets`** — `score` (1 = pass, <1 = fail) + failing element count from `details.items.length`.
-- **`image-alt`** — `score` and failing element count.
-- **`meta-description`** / **`document-title`** — pass/fail.
-- **`is-crawlable`** / **`robots-txt`** — pass/fail.
+This is what preserves the `--phases 3` standalone path: if `raw/` is empty, the gatherer still fetches cleanly on its own.
 
-Compute derived metrics:
-- **Homepage payload today (MB)** = `total-byte-weight.numericValue / 1024 / 1024`.
-- **Target payload (MB)** = today − sum of image savings (optimized + responsive + modern formats + offscreen).
-- **Estimated time saved on mobile (seconds)** = sum of `overallSavingsMs` across top 3 opportunities / 1000.
-- **Implied CLS conversion drag (%)** = `max(0, (CLS − 0.1) / 0.1) × 7`. (Rule of thumb: every 0.1 of CLS above 0.1 correlates with roughly a 7% drop in conversions — Google Web.dev research.)
+The gatherer also emits new fields:
+- `favicon` — pure disk inspection of `$SEO/favicon.ico` and `$SEO/apple-touch-icon.png`, no network
+- `social` — homepage-only extraction of social profile links, GBP/maps links, directory profiles (Yelp, JustDial, IndiaMart, etc.) and JSON-LD `sameAs` entries. See `extract-social-links.mjs`.
+- `derived.site_wide_alt_coverage` — computed in Phase 1 during the navigation crawl. If null (crawl didn't collect it), the report must **not fabricate** a number.
 
-#### Page-Level SEO Checks
+The script writes `$RESEARCH/audit-data.json` with this shape:
 
-For **each page in `$AUDIT_PAGES`**, fetch the HTML directly (WebFetch with a browser User-Agent, or browser MCP) and extract:
-- **`<title>`** — exact text and length. Under 60 chars?
-- **`<meta name="description">`** — exact text and length. Empty string = fail. Under 160 chars?
-- **OG tags** — og:title, og:description, og:image — capture exact values. Missing og:image is a specific flag because it breaks WhatsApp/social previews.
-- **Twitter card** — twitter:card present?
-- **`<h1>`** — count occurrences on the page.
-- **Canonical URL** — present?
-- **JSON-LD `@type`** — list every `@type` found in `<script type="application/ld+json">` blocks (flatten `@graph` arrays). Note which `@type`s are present and which important ones are missing.
-- **Image alt coverage** — regex count of `<img>` tags vs. `<img>` tags with an `alt` attribute, as a percentage.
-- **Visible "last updated" date** — search the rendered HTML for patterns like "Last updated", "Updated on", "Updated:".
+```json
+{
+  "base_url": "https://example.com",
+  "site_map_summary": { "total_pages_discovered": 218, "unique_pages": 8, "template_groups": 5 },
+  "audited_pages": [
+    {
+      "slug": "homepage",
+      "url": "https://example.com/",
+      "signals": {
+        "title": "...", "title_length": 10, "meta_description": "...",
+        "og_title": null, "og_image": null, "canonical": null,
+        "h1_count": 0, "h2_count": 4, "jsonld_types": [],
+        "img_total": 17, "img_without_alt": 3,
+        "ssr_ratio": 0.03, "generic_link_count": 2, "last_updated_visible": false
+      },
+      "lighthouse": {
+        "mobile": { "scores": {...}, "cwv": {...}, "opportunities": {...}, "derived": { "today_mb": 2.21, "target_mb": 2.21, "top_savings_seconds": 0.6, "cls_conversion_drag_pct": 52 } },
+        "desktop": { "scores": {...}, "cwv": {...}, "derived": { "cls_conversion_drag_pct": 56 } }
+      }
+    }
+  ],
+  "robots": {
+    "present": true,
+    "bots": { "GPTBot": "not_mentioned", "PerplexityBot": "not_mentioned", ... },
+    "wildcard_allows": true,
+    "sitemaps": ["https://example.com/sitemap.xml"]
+  },
+  "llms_txt": { "present": false, "status": 404, "bytes": 0 },
+  "llms_full_txt": { "present": false, "status": 404 },
+  "derived": {
+    "pages_discovered": 218,
+    "audited_pages": 1,
+    "headline": {
+      "today_mb": 2.21, "target_mb": 2.21, "saved_mb": 0,
+      "top_savings_seconds": 0.6,
+      "cls_conversion_drag_mobile": 52, "cls_conversion_drag_desktop": 56
+    },
+    "quick_wins_count": 10,
+    "quick_wins": ["Add homepage meta description", "Add Open Graph image", ...]
+  }
+}
+```
 
-#### Site-Wide SEO & Infrastructure Checks
+**The Hero Stat Strip, Numeric Findings bullets, AI Search Visibility section, and Marketing Snippets all read directly from `audit-data.json`.** No further computation is needed in the LLM — your job from here is narrative, layout, and base64-embedding the assets.
 
-Run these once per audit:
-- **`/sitemap.xml` / `/sitemap_index.xml` / `/wp-sitemap.xml`** — which one resolves? HTTP status?
-- **`/robots.txt`** — fetch raw text. Does it reference the sitemap?
-- **`/favicon.ico` and any `<link rel="icon">`** — does the site have a real favicon, or is it the default browser globe?
-- **Broken pages** — scan `site-map.json` for any URLs that returned errors during crawl (if Phase 1 captured them).
-- **Site-wide alt coverage** — walk every content file in `$RESEARCH/content/` and count total `image` nodes vs. those with non-empty `alt`. This gives a broader number than the per-page spot check.
-- **Server-rendered vs JS-injected content** — compare the raw HTML fetched via `curl`/WebFetch against what browser MCP renders. If the rendered DOM has significantly more text than the raw HTML, content is JS-injected (bad for AI crawlers that don't run JS).
-- **"Time to first artwork/product"** — count clicks from the homepage to reach the first buyable product/artwork page. Use the homepage's scraped links: is there a direct link, or does the user have to drill through Gallery → Category → Product?
+Helper scripts (all called by `gather-audit-data.mjs`, but runnable individually for debugging):
+- `scripts/audit/extract-page-signals.mjs <html-file> <url>` — per-page SEO/GEO regex extraction
+- `scripts/audit/analyze-robots.mjs <robots.txt>` — AI crawler access matrix for 12 bots
+- `scripts/audit/extract-lighthouse.mjs <psi.json>` — scores, CWV, opportunities, derived metrics
 
-#### AI Search Visibility (GEO) Checks
+Raw fetched HTML is cached under `$RESEARCH/raw/` (`robots.txt`, `llms.txt`, `<slug>.html` per audited page) so reruns are cheap.
 
-This is the newest and most important section. SMB owners all want to know: "Can ChatGPT/Perplexity/Gemini cite my site?" Run these checks:
-
-1. **AI crawler robots.txt rules.** Parse `/robots.txt` and check the `User-agent:` directives for each of these bots. For each, record: `allowed` (no Disallow for their UA), `partially_blocked` (some paths blocked), or `fully_blocked` (Disallow: /):
-   - `GPTBot` (OpenAI — trains ChatGPT)
-   - `OAI-SearchBot` (OpenAI — powers ChatGPT search)
-   - `ChatGPT-User` (on-demand fetches)
-   - `PerplexityBot` (Perplexity)
-   - `Perplexity-User` (on-demand)
-   - `ClaudeBot` (Anthropic)
-   - `Claude-Web` (Anthropic)
-   - `Google-Extended` (Google AI / Gemini training)
-   - `Applebot-Extended` (Apple Intelligence)
-   - `CCBot` (Common Crawl — feeds many LLMs)
-   - `Bytespider` (ByteDance)
-   - `Amazonbot` (Amazon/Alexa)
-
-2. **`/llms.txt` and `/llms-full.txt`** — probe both. HTTP 200 = present. Most sites won't have these; it's a quick-win for the client.
-
-3. **Structured data inventory.** From the JSON-LD types captured above (across all audited pages), specifically check for presence of these high-value `@type`s. Each one missing is a quick win:
-   - `Organization` (on homepage or `/about`)
-   - `LocalBusiness` (critical for local SEO + AI "best X in Y" queries)
-   - `WebSite` with `SearchAction`
-   - `BreadcrumbList`
-   - `Product` (for each artwork/product — only sample one)
-   - `Person` (for each artist profile — only sample one)
-   - `Event` (for exhibitions, if applicable)
-   - `FAQPage` (anywhere)
-   - `ImageObject` with `creator`
-
-4. **Entity signals for authority.** Check whether the homepage or about page includes:
-   - Founding date / founded year
-   - Physical address (text form, not just map iframe)
-   - Opening hours
-   - `sameAs` links to social profiles inside JSON-LD
-   - Named founder/owner mentioned by name
-
-5. **Content extractability (SSR vs CSR).** Compare raw HTML character count vs. rendered DOM text length. Ratio < 0.5 = content is mostly JS-injected (bad for AI). Note the ratio.
-
-6. **Heading hierarchy quality.** From the scraped content, check each audited page has exactly one `<h1>`, heading levels don't skip (no h1 → h3), and headings are descriptive (not "Click here", "Learn more").
-
-7. **Descriptive link text.** Scan scraped content for generic anchors — count occurrences of "click here", "read more", "learn more", "here". These hurt both SEO and AI extraction.
-
-8. **Live AI citation test (optional).** If the user has configured a Perplexity or OpenAI API key in `.env` (`PERPLEXITY_API_KEY` / `OPENAI_API_KEY`), run two test queries against Perplexity's Chat Completions API:
-   - `"best {business.type} in {business.location}"` (e.g., "best art galleries in Gurgaon")
-   - `"{business.name} {business.location}"` (e.g., "Gallery One India Gurgaon")
-   Check whether the response text includes the client's domain or a citation pointing to it. Record `cited: true|false` plus the competing domains that WERE cited.
-   **Gracefully skip this check if no API key is present** — just note "Live AI citation test skipped (no API key configured)" in the report.
-
-9. **Build the AI-ready quick wins checklist.** From all the above, synthesize 6–8 concrete, cheap-to-fix items. Examples: "Add `Organization` + `LocalBusiness` JSON-LD to homepage (30 min)", "Publish `/llms.txt` pointing at About + Services + Contact (15 min)", "Add og:image to all product pages (templated — 1 hour)", "Unblock GPTBot and PerplexityBot in robots.txt (2 min)".
+**Still the LLM's responsibility** (not covered by the script):
+- Selecting 2–3 pages to audit and ensuring PSI JSON files exist for them (call PSI first if needed)
+- Checking entity signals on the homepage/about page (founding date, address, opening hours, `sameAs`, named founder) — read from `$RESEARCH/content/*.json`
+- Counting "time to first product/artwork" clicks from the homepage nav
+- Optional live Perplexity/OpenAI citation test (`PERPLEXITY_API_KEY` / `OPENAI_API_KEY` from `.env`, gracefully skip if absent)
+- Synthesizing the 6–8 item AI-ready quick wins checklist (the script provides a baseline `quick_wins` list — refine it with context-specific items like "Add LocalBusiness JSON-LD", "Publish llms.txt pointing at About + Services")
+- Translating every number into the plain-language "Findings" bullets
 
 ### Write the Report (HTML)
 
 ### Write the Report (HTML)
 
-Save to `$REPORT/site-audit.html`. This is a **self-contained HTML file** with embedded CSS — no external dependencies. It must look professional enough to share directly with a client AND function as marketing collateral (screenshot-worthy, forwardable, referenceable).
+Save to `$REPORT/index.html`. This is a **self-contained HTML file** with embedded CSS — no external dependencies. It must look professional enough to share directly with a **lead** (before any clone or build has happened) AND function as marketing collateral.
 
-The HTML must include, in order:
+**First line of `<body>` must be this exact detector marker so `/clone-website` can recognize it later:**
+
+```html
+<!-- publifai-site-audit v2 -->
+```
+
+The HTML must include, in this top-to-bottom order:
+
+0. **Sticky top nav** — pure CSS (`position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);`), horizontal pill row. On mobile it becomes a horizontal-scroll row (`overflow-x: auto; white-space: nowrap;`) — no hamburger. Hidden in print (`@media print { nav { display: none; } }`). Anchors: `#tldr`, `#wins`, `#improve`, `#design`, `#geo`, `#perf`, `#recommendation`. Every section must have `id="..."` AND `scroll-margin-top: 80px`.
+
+1. **Header block** — client logo + business name + domain + "Prepared by Publifai" + date. Same as before.
+
+2. **TL;DR (`#tldr`)** — NEW, plain English, **max 150 words**, zero jargon. Banned words: "CLS", "LCP", "render-blocking", "DOM", "viewport", "LCP", "TBT". Three paragraphs:
+   - ¶1 "Where your website stands today" — one verdict sentence + one headline stat (e.g., "your homepage is 4.8 MB — about 4x heavier than it needs to be").
+   - ¶2 "Biggest opportunity" — highest-leverage improvement, in the owner's language.
+   - ¶3 "What we'd do in week one" — 3 concrete shipped outcomes, no tech terms.
+   - **Hard constraint:** if your draft is over 150 words, cut ruthlessly before rendering.
+
+3. **What works (`#wins`)** — NEW, 3-5 positive bullets drawn from the *same* `audit-data.json`. Examples: "JSON-LD structured data is in place on your homepage", "Mobile accessibility scores 95/100", "Your sitemap is published and healthy". Must be real findings, not fillers.
+
+4. **What to improve (`#improve`)** — the old Numeric Findings content, reorganized under **four subheadings**:
+   - **Speed & weight** — today MB, target MB, CLS-driven conversion drag callout.
+   - **SEO fundamentals** — title, meta description, canonical, heading hierarchy, alt text coverage.
+   - **AI search readiness (GEO)** — all 8 GEO checks + the new **Entity Completeness** row sourced from `audit-data.entity.completeness_pct` and the sub-fields (org_name, founding_date, address, phone, hours, founder_name).
+   - **Trust signals** — GBP linked, social presence, directory profiles (from `audit-data.social` + `audit-data.entity`).
+   - Every bullet still carries a real number.
+
+5. **Design (`#design`)** — NEW section, three subsections:
+
+   **5a. Your current design at a glance**
+   - Homepage desktop + mobile screenshots (base64-embedded from Phase 2).
+   - Color palette: rendered swatches with hex + friendly names (from `client.json[design][colors]`).
+   - Typography: heading + body pairing, each rendered as a live sample at 32px / 16px.
+   - Layout observations: free-text from Phase 2's vision LLM description (vibe + layout archetype).
+
+   **5b. Category benchmark** — **render only if `audit-data.derived.competitor_design[]` is non-empty.**
+   - 2-4 competitor homepage thumbnails side-by-side with the client's homepage thumbnail.
+   - Under each competitor: one-line "what they do well" (`does_well` field).
+   - One pattern-callout paragraph that names a shared move the competitors make and contrasts it with the client (e.g., *"All three use a full-bleed hero with a single CTA; yours uses a 4-column grid above the fold, which fragments attention."*). Write this fresh each run from the actual screenshots + design_language fields — do not hardcode.
+
+   **5c. What we'd change** — 3-5 concrete, opinionated design moves ("drop the 4-col grid above the fold for a single full-bleed artwork carousel", "swap the uppercase nav for title case in a serif that matches your wordmark"). Anchor each with a competitor thumbnail if available, otherwise text-only.
+
+6. **SEO & AI search (`#geo`)** — the existing GEO section, pulled out as a top-level nav-addressable section. Substance unchanged: AI crawler access table, llms.txt status, structured data scorecard, entity signals (now cross-linked with the Entity Completeness row in #improve), content extractability, heading/link quality, optional live citation test, AI-ready quick wins checklist.
+
+7. **Performance (`#perf`)** — existing PageSpeed gauges + Core Web Vitals table + per-page deep dives + WhatsApp share preview + Google SERP preview + favicon/tap-targets. Substance unchanged, just nav-addressable.
+
+8. **Recommendation (`#recommendation`)** — existing two-option block (Faithful Rebuild / Same Bones, New Look), unchanged.
+
+9. **Marketing snippets** — existing, unchanged.
+
+10. **Footer** — Publifai contact + a single line: *"Reply to the WhatsApp thread to ship this."*
+
+The old Hero Stat Strip, "At a Glance", "Pages & Structure", and free-floating Design & Branding sections are **replaced** by the TL;DR + What works + Design structure above. Do not render them alongside.
+
+The HTML must include, in order (legacy detail — keep as reference for subsection content only, not top-level order):
 
 1. **Inline CSS** — all styles embedded. Clean, modern design; max-width ~820px; Inter or system font; print-friendly `@media print` styles.
 
@@ -663,9 +765,9 @@ The HTML must include, in order:
     - Under the recommended option, include a one-sentence **"What we'd ship in week one"** preview (e.g., "Homepage, About, Gallery listing, and Contact — mobile-first, with CLS fixed and og:image on every product so WhatsApp previews work.").
 
 15. **Favicon / Tap Targets / Google Business Profile** — small section under SEO Overview covering:
-    - Favicon: detected/default/missing
+    - Favicon: read from `audit-data.favicon` (pure disk inspection — `favicon.ico` + `apple-touch-icon.png`). Mark as detected / missing.
     - Mobile tap target failures (from Lighthouse `tap-targets` audit, numeric)
-    - Google Business Profile: is the business listed? Is it linked from the site? (Best-effort check — search for the business name and look for GBP-style results; if no API, just note "Not linked from your site. If you have a GBP listing, we'll connect it during the rebuild.")
+    - **Your presence beyond your website** row — read `audit-data.social`. List each social profile found in `social.found_via_links` with a ✓. If `social.gbp_linked` is false, flag as a quick win: *"Link your Google Business Profile from your site footer — it's the single biggest trust signal for local SMBs."* List any `directory_profiles` (Yelp/JustDial/IndiaMart/etc.) found.
 
 16. **What Happens Next** — numbered steps (unchanged).
 
@@ -887,172 +989,24 @@ Follow this content structure:
 - **Self-contained:** Must render standalone with no external deps (Google Fonts degrades gracefully).
 - **Deploys cleanly:** The report must deploy to `<slug>.pages.dev/audit/` without broken images or missing assets.
 
-### Deploy the Audit to `<slug>.pages.dev/audit/`
+### Deploy the Audit to the Root of `<slug>.pages.dev`
 
-After the HTML is generated, publish the audit to the client's Cloudflare Pages project so it's shareable via a live URL. This assumes `scripts/provision-site.sh` has already been run.
-
-The deploy source of truth is `clients/<client-folder>/public/`. Every Publifai skill that wants something live on `<slug>.pages.dev` writes into that folder and then calls the shared deploy script — no per-skill staging.
+Audit goes to the **root** (`/`) so we can share a clean URL with leads before any clone has run. When `/clone-website` runs later, it detects the `<!-- publifai-site-audit v2 -->` marker in `public/index.html` and moves the audit to `public/audit/index.html`, then drops a low-emphasis footer link in the cloned site.
 
 **Steps:**
 
-1. **Read slug** from `client.json`: `domains.subdomain` (strip `.pages.dev`).
-2. **Populate `public/audit/`** in the client folder (outside this repo, in `$CLIENTS_DIR/<name>/public/audit/`):
-   - Copy `$REPORT/site-audit.html` → `$CLIENTS_DIR/<name>/public/audit/index.html`
-3. If `$CLIENTS_DIR/<name>/public/index.html` does not yet exist, create a minimal placeholder linking to `/audit/` (so visitors hitting the root see something). Use `[Business Name]` from `client.json`:
-   ```html
-   <!DOCTYPE html>
-   <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>[Business Name] — Coming soon on Publifai</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:10vh auto;padding:0 24px;color:#1a1a1a}h1{font-size:28px;margin-bottom:8px}p{line-height:1.6;color:#555}a{display:inline-block;margin-top:16px;padding:10px 18px;background:#111;color:#fff;text-decoration:none;border-radius:6px}a:hover{background:#333}</style></head><body><h1>[Business Name]</h1><p>Your new website is being built on Publifai. In the meantime, here is the review we prepared of your current site.</p><a href="/audit/">View the site review →</a></body></html>
-   ```
-4. **Call the publifai-level deploy script** from the publifai repo root (the repo that contains `clients/`). Pass only the **client folder name** — the script reads the Pages project slug from `client.json`:
+1. **Read slug** from `client.json[slug]`.
+2. **Copy the report to the deploy root** — `$REPORT/index.html` → `$CLIENTS_DIR/<name>/public/index.html`. The HTML already contains the detector marker on the first line of `<body>`.
+3. **Do not create a placeholder.** The audit *is* the root until clone runs.
+4. **Call the publifai-level deploy script:**
    ```bash
    cd <publifai-repo-root>
    ./scripts/deploy-client.sh <client-folder>
    ```
-   The script stages the folder (ignoring `client.json` and dotfiles), deploys via `wrangler pages deploy` to the project's production branch, and appends a deploy note to `client.json`.
-5. **Update client.json** (in addition to the note the script adds):
-   - `phases.B_capture.discover.audit_report.report_deployed_url` = `https://<slug>.pages.dev/audit/`
+5. **Update `client.json`:**
+   - `phases.B_capture.discover.audit_report.report_deployed_url` = `https://<slug>.pages.dev/` (no `/audit/` suffix yet — clone will flip this later).
 
-The audit is now live at `https://<slug>.pages.dev/audit/`. Because `public/` is the single deploy source, future skills that add new live content (mirror, draft build, production) just drop their files into the same `public/` folder and re-run `./scripts/deploy-client.sh` — the audit keeps working automatically.
-
-## Phase 4: Content Extraction (Output 4)
-
-**Skip this phase if `--phases` was provided and `4` is not in the list.**
-**Requires:** `$RESEARCH/site-map.json` (Phase 1). If missing, warn the user and skip this phase.
-
-Goal: Extract content from representative pages ONLY.
-
-### Which Pages to Scrape
-
-- **Every unique page** from the site map
-- **ONE representative page per template group** (the `example_url`)
-- **NEVER scrape more than ~10 pages total** regardless of site size
-- **Skip pages behind authentication** (login, admin, my-account)
-
-### What to Extract Per Page
-
-For each page, navigate with browser MCP and extract:
-
-1. **Meta information:**
-   - `<title>` tag content
-   - Meta description
-   - Open Graph tags (og:title, og:description, og:image)
-   - Canonical URL
-   - Any JSON-LD structured data
-
-2. **Heading hierarchy:**
-   - Every H1, H2, H3, H4 with their exact text
-   - Nesting structure (which H3s are under which H2, etc.)
-
-3. **Body content:**
-   - All paragraph text, verbatim
-   - Lists (ordered and unordered) with items
-   - Blockquotes
-   - Tables with data
-
-4. **Images:**
-   - All `<img>` src URLs, alt text, and context (hero, inline, gallery, background)
-   - Download each to `$IMAGES/`
-
-5. **Links:**
-   - Internal navigation links
-   - External links
-   - Social media links
-   - CTA buttons with their text and target
-
-6. **Forms:**
-   - Form fields (name, type, placeholder, required)
-   - Form action URL
-   - Submit button text
-
-7. **Embedded content:**
-   - Google Maps iframes (extract coordinates/address)
-   - YouTube/Vimeo embeds (extract video IDs)
-   - Social media embeds
-
-8. **For template pages specifically:**
-   - Mark each field as `"variable"` (changes per instance — e.g., artist name, bio, artwork image) or `"fixed"` (same on every instance — e.g., sidebar layout, related sections)
-
-### Output Content Files
-
-Save one file per scraped page in `$RESEARCH/content/`:
-
-```json
-{
-  "url": "/about-us/",
-  "label": "About Us",
-  "type": "unique_page",
-  "scraped_at": "2026-04-04T12:00:00Z",
-  "meta": {
-    "title": "About Us - Gallery One India",
-    "description": "Learn about Gallery One India...",
-    "og_image": "/images/seo/og-about.jpg",
-    "canonical": "https://www.galleryoneindia.com/about-us/"
-  },
-  "headings": [
-    { "level": 1, "text": "About Us" },
-    { "level": 2, "text": "Our Story" },
-    { "level": 2, "text": "Our Team" }
-  ],
-  "content": [
-    {
-      "type": "paragraph",
-      "text": "1999. Gurgaon City, bordering New Delhi..."
-    },
-    {
-      "type": "image",
-      "src": "/images/about-gallery.jpg",
-      "alt": "Gallery One India interior",
-      "context": "inline"
-    }
-  ],
-  "links": {
-    "internal": ["/contact/", "/gallery/"],
-    "external": [],
-    "social": ["https://facebook.com/galleryoneindia"]
-  },
-  "forms": [],
-  "embedded": []
-}
-```
-
-For template pages, add a `template_fields` section:
-
-```json
-{
-  "url": "/product/jagannath-paul/",
-  "type": "template_instance",
-  "template_name": "Product Page",
-  "template_fields": {
-    "variable": {
-      "product_name": "Jagannath Paul",
-      "product_image": "/images/products/jagannath-paul.jpg",
-      "artist_name": "Jagannath Paul",
-      "size": "48 x 48 Inches",
-      "price": 400000,
-      "description": "..."
-    },
-    "fixed": {
-      "sidebar_sections": ["Related Artworks", "Artist Info"],
-      "page_layout": "two-column with sidebar"
-    }
-  }
-}
-```
-
-## Smart Scraping Rules
-
-These are hard limits — never violate them:
-
-- **Never scrape more than 10 pages** regardless of site size
-- All unique pages get scraped (usually 4-6)
-- One representative per template group (usually 1-3)
-- If site has 500+ pages, it's almost certainly 5-6 unique pages + a few template types with hundreds of instances
-- Download ALL images from scraped pages (client will need them)
-- **Skip pages behind authentication** (admin panels, member areas, login pages)
-- **Skip pagination** (`?page=2`, `/page/2/`)
-- **Skip search results** (`?s=`, `?q=`)
-- **Skip feed URLs** (`/feed/`, `/rss/`)
-- **Respect robots.txt** — check it before crawling
+The audit is now live at `https://<slug>.pages.dev/` and shareable on WhatsApp as a lead magnet. No clone is required to share it.
 
 ## Completion
 
@@ -1061,36 +1015,38 @@ When all requested phases are done, print a summary. Only include sections for p
 ```
 Site Discovery Complete: example.com
 ═══════════════════════════════════════
-Phases run: 1, 2, 3, 4  (or "1, 2" if --phases was used)
+Phases run: 1, 2, 3  (or "1, 2" if --phases was used)
 
-Site Map:                              ← only if Phase 1 ran
-  • 6 unique pages discovered
-  • 2 template groups (47 products, 12 blog posts)
-  • 64 total pages on site
-  Saved → $RESEARCH/site-map.json
+Extract (Phase 1):                     ← only if Phase 1 ran
+  • 6 unique pages discovered, 2 template groups (47 products, 12 blog posts), 64 total
+  • PageSpeed fetched for N audit pages (mobile + desktop)
+  • robots.txt, llms.txt, raw HTML, entity signals, social/GBP links cached
+  • Logo + favicon + OG image downloaded
+  Saved → $RESEARCH/site-map.json, audit-pages.json, audit-data.json, raw/, pagespeed/
+  client.json updated: branding, business.socials, assets
 
-Design System:                         ← only if Phase 2 ran
-  • Primary: #313131, Accent: #007cba
-  • Fonts: Playfair Display (headings), Open Sans (body)
-  • 16 assets downloaded to $IMAGES/
-  Saved → $RESEARCH/design-system.json
+Perceive (Phase 2):                    ← only if Phase 2 ran
+  • Screenshots captured for every audit page (desktop + mobile) + homepage tablet
+  • Design system derived from pixels via vision LLM
+  • Primary: #313131, Accent: #007cba · Fonts: Playfair Display / Open Sans
+  Saved → $SCREENSHOTS/
+  client.json updated: full design tree
 
-Site Audit Report:                     ← only if Phase 3 ran
-  • Client-facing website review with PageSpeed scores
+Report (Phase 3):                      ← only if Phase 3 ran
+  • Client-facing audit synthesized from Phase 1 + Phase 2 outputs
   • Desktop: Performance XX/100, Accessibility XX/100, SEO XX/100
   • Mobile:  Performance XX/100, Accessibility XX/100, SEO XX/100
-  Saved  → $REPORT/site-audit.html
-  Live   → https://<slug>.pages.dev/audit/
-
-Content Extracted:                     ← only if Phase 4 ran
-  • 8 pages scraped (6 unique + 2 templates)
-  • 24 images downloaded
-  Saved → $RESEARCH/content/
+  Saved  → $REPORT/index.html
+  Live   → https://<slug>.pages.dev/   (lead-shareable; clone will later move to /audit/)
 
 Next step: Share the audit report with the client, then run /clone-website with the same --client flag to build the site.
 ```
 
 If phases were skipped, suggest the next command to run remaining phases:
 ```
-To run remaining phases: /discover-site <url> --client <name> --phases 3,4
+To run remaining phases: /discover-site <url> --client <name> --phases 2,3
 ```
+
+---
+
+**Future (v2, not shipped):** Active social presence audit. Today the discover skill only detects whether a business *links to* its social profiles and Google Business Profile from the website. A future enhancement will actively look up the business by name + location on Google Places API, fetch GBP rating/review count/photo count, and probe Instagram/Facebook handles for activity. This is gated on a Places API key and a budget decision — tracked as a separate enhancement.

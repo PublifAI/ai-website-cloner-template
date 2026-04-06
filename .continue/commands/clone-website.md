@@ -114,7 +114,7 @@ If the user provides additional instructions (specific fidelity level, customiza
 
    Use these paths consistently throughout all phases. From here on, this document uses `$RESEARCH`, `$SCREENSHOTS`, `$COMPONENTS`, `$IMAGES`, `$SEO`, `$OUTPUT`, `$SCRIPTS`, and `$REPORT` as placeholders for the resolved paths.
 
-6. **Check for discovery output.** If `$RESEARCH/site-map.json` exists (from running `/discover-site`), read it and use it to determine which pages to clone. If `$RESEARCH/design-system.json` exists, use it for design tokens. If `$RESEARCH/content/` has files, use them for page content. This avoids re-scraping what was already discovered.
+6. **Check for discovery output.** If `$RESEARCH/site-map.json` exists (from running `/discover-site`), read it and use it to determine which pages to clone. Read design tokens from **`client.json[design]`** (the full design tree — `research/design-system.json` is deprecated). Read the business name and logo path from **`client.json[branding]`**. If `$RESEARCH/content/` has files, use them for page content. This avoids re-scraping what was already discovered.
 7. Create all output directories.
 8. When working with multiple pages, optionally confirm whether to run them in parallel (recommended) or sequentially.
 
@@ -194,22 +194,29 @@ If `/discover-site` was run first, its outputs are your primary data source — 
    - One representative per template group (typically 1–2)
    - If the total exceeds 8, prioritize pages present in the main navigation; ask the user which to drop
    - If `client.json` has `structure.pages` populated (client-approved list), use that instead
+   - **If `$RESEARCH/audit-pages.json` exists**, treat it as a hint for the most important pages — ensure every page in it is present in the clone build list (don't override, just include).
 
-2. **Read `$RESEARCH/design-system.json`** — use directly for `tailwind.config.js` generation (colors, fonts, spacing, components). Do not re-extract design tokens from the browser.
+2. **Read `client.json[design]`** — the full design tree (colors, typography, spacing, layout, components, radius, shadows, transitions). Use directly for `tailwind.config.js` generation. Do not re-extract design tokens from the browser. `research/design-system.json` is **deprecated** — do not read it.
 
-3. **Read `$RESEARCH/content/*.json`** — use for page text content, headings, meta tags, image references, and template field mappings. Only visit pages in the browser for visual extraction (computed styles, interaction sweep) — text content comes from these files.
+3. **Read `client.json[branding]`** for the business name and logo:
+   - Use `branding.business_name` for `<title>` tags, headings, footer copy. Do NOT re-derive from the live site's `<title>`.
+   - If `branding.logo_path` is set, copy that file to `$OUTPUT/images/logo.<ext>` with a well-known filename so templates can reference it deterministically.
 
-4. **Read `$REPORT/site-audit.md`** (or `.html`) if it exists — note any issues flagged (mobile problems, missing meta tags, broken links) as a QA checklist for Phase 5.
+4. **Read `client.json[business][socials]`** for footer social icons — no re-parsing of HTML needed.
 
-5. **Use existing assets** — images already downloaded to `$IMAGES/` and `$SEO/` during discovery. Do not re-download them (see Phase 2 step 4).
+5. **Read `$RESEARCH/content/*.json`** — use for page text content, headings, meta tags, image references, and template field mappings. Only visit pages in the browser for visual extraction (computed styles, interaction sweep) — text content comes from these files.
 
-6. Proceed to Phase 2 with discovery data. You still need the browser for visual inspection (computed styles, interaction sweep, screenshots) but you already have the site structure, design tokens, content, and assets.
+6. **Read `$REPORT/site-audit.md`** (or `.html`) if it exists — note any issues flagged (mobile problems, missing meta tags, broken links) as a QA checklist for Phase 5.
+
+7. **Use existing assets** — images already downloaded to `$IMAGES/` and `$SEO/` during discovery. Do not re-download them (see Phase 2 step 4).
+
+8. Proceed to Phase 2 with discovery data. You still need the browser for visual inspection (computed styles, interaction sweep, screenshots) but you already have the site structure, design tokens, content, and assets.
 
 If no discovery data exists, proceed with single-page extraction below. The browser becomes your only data source — extract everything from scratch, but still respect the 5–8 page limit.
 
 ### Screenshots
-- Take **full-page screenshots** at desktop (1440px) and mobile (390px) viewports
-- Save to `$SCREENSHOTS/` with descriptive names
+- **Read-if-exists rule:** before taking any screenshot, check `$SCREENSHOTS/<slug>-desktop.png` and `<slug>-mobile.png`. Phase 2 of `/discover-site` already captured every page in `audit-pages.json` at both viewports using canonical slugs. Reuse those directly. Log "reusing screenshot $SCREENSHOTS/<slug>-desktop.png" for each hit.
+- For pages NOT in `audit-pages.json`, take **full-page screenshots** at desktop (1440px) and mobile (390px) viewports and save with the same `<slug>-desktop.png` / `<slug>-mobile.png` naming.
 
 ### Global Extraction
 Extract from the page:
@@ -236,6 +243,97 @@ Save all findings to `$RESEARCH/BEHAVIORS.md`.
 
 ### Page Topology
 Map out every distinct section of the page from top to bottom. Save as `$RESEARCH/PAGE_TOPOLOGY.md`.
+
+## Phase 1.5: Content Scrape for Rebuild
+
+> This used to live in `/discover-site` Phase 4. It was moved here because content shape is a builder concern, not an auditor concern — the discover skill produces signals, this skill produces builder inputs.
+
+Runs after Reconnaissance, before the Foundation Build. Produces one JSON per scraped page in `$RESEARCH/content/`, used by Phase 3 builders to fill real text, images, and template fields.
+
+### Inputs
+
+- `$RESEARCH/audit-pages.json` — canonical audit page list from discover.
+- `$RESEARCH/site-map.json` — for `template_groups[].example_url`.
+
+### Page selection
+
+- Every page in `audit-pages.json` (always).
+- One `example_url` per template group from `site-map.json` (dedup against audit-pages).
+- **Max 10 pages total.** If the set exceeds 10, drop extra template instances first, never drop audit-pages entries.
+- **Skip:** auth-gated pages, pagination (`?page=2`, `/page/2/`), search result pages, feeds (`/feed/`, `.xml`, `.rss`).
+- **Respect `robots.txt`** — already cached at `$RESEARCH/raw/robots.txt` from discover, read it, do not refetch.
+
+### Fetch rules (reuse discover cache)
+
+- If `$RESEARCH/raw/<slug>.raw.html` or `<slug>.html` already exists and is non-empty, **parse it directly — do not refetch.** This is the handshake with discover Phase 1.
+- Fresh fetch only for template exemplars that were not in `audit-pages.json` (and therefore have no cached raw HTML).
+- Cache fresh fetches to `$RESEARCH/raw/<slug>.html` so subsequent reruns are cheap.
+
+### Per-page extraction
+
+For each scraped page, write `$RESEARCH/content/<slug>.json` with:
+
+```json
+{
+  "slug": "about",
+  "url": "https://example.com/about/",
+  "role": "homepage | interior | template_example",
+  "template_group": "Product Page (only when role=template_example)",
+  "meta": {
+    "title": "...",
+    "description": "...",
+    "og_title": "...",
+    "og_description": "...",
+    "og_image": "https://..."
+  },
+  "headings": [
+    { "level": 1, "text": "..." },
+    { "level": 2, "text": "..." }
+  ],
+  "body": [
+    { "type": "paragraph", "text": "..." },
+    { "type": "list", "items": ["...", "..."] },
+    { "type": "quote", "text": "..." }
+  ],
+  "images": [
+    { "src": "https://...", "alt": "...", "local_path": "assets/images/..." }
+  ],
+  "links": [
+    { "href": "/contact", "text": "Contact us" }
+  ],
+  "forms": [
+    { "action": "/contact", "method": "POST", "fields": [{ "name": "email", "type": "email", "label": "Email" }] }
+  ],
+  "embedded": [
+    { "type": "youtube", "url": "https://youtube.com/..." }
+  ]
+}
+```
+
+**Template pages only** — also include `template_fields` splitting content into what changes per instance vs what's fixed across the group:
+
+```json
+{
+  "template_fields": {
+    "variable": {
+      "artist_name": "Jagannath Paul",
+      "artist_image": "https://.../jagannath-paul.jpg",
+      "bio": "..."
+    },
+    "fixed": {
+      "sidebar_layout": "left-image-right-meta",
+      "nav_position": "top"
+    }
+  }
+}
+```
+
+### Output
+
+- `$RESEARCH/content/*.json` — one file per scraped page.
+- Any newly-downloaded images go to `$IMAGES/` alongside discover's downloads.
+
+Phase 3 builders read these JSONs directly — they must not re-scrape the live site for text content.
 
 ## Phase 2: Foundation Build
 
@@ -271,7 +369,7 @@ module.exports = {
 }
 ```
 
-If `$RESEARCH/design-system.json` exists, use its values directly.
+Read design tokens from `client.json[design]` (the full design tree). `research/design-system.json` is deprecated.
 
 ### 2. Create css/input.css
 
@@ -501,6 +599,41 @@ Before dispatching ANY builder agent:
 - **Don't skip asset extraction** — without real images, the clone looks fake
 - **Don't bundle unrelated sections** — one agent per section
 - **Don't skip responsive extraction** — test at 1440, 768, and 390
+
+## Phase 6: Deploy Takeover (audit → /audit/)
+
+Before the cloned site replaces the audit at the root, move the audit out of the way.
+
+The deploy source of truth is `$CLIENTS_DIR/<name>/public/`. Clone writes the assembled site into that folder (`public/index.html`, `public/about.html`, etc.) — not into a separate `output/` subtree — so `deploy-client.sh` can stage and deploy it unchanged.
+
+### Audit move-out heuristic
+
+1. **Check for existing audit at root.** If `$CLIENTS_DIR/<name>/public/index.html` exists AND its first 200 bytes contain the string `publifai-site-audit`, move it:
+   ```
+   public/index.html → public/audit/index.html
+   ```
+   (Any associated base64-embedded assets live inside the single HTML file — no other files to move.)
+2. **If no marker is present,** leave `public/index.html` alone — it's either already a cloned site or something else; don't clobber it.
+3. **Add a low-emphasis footer link** in the cloned template, gated on `public/audit/index.html` existing after step 1:
+   ```html
+   <a href="/audit/" class="text-xs text-muted hover:text-foreground">Site review</a>
+   ```
+   Place it in the footer alongside other secondary links (copyright, legal). Skip this link entirely if `public/audit/index.html` does not exist.
+
+### Deploy
+
+Call the publifai-level deploy script from the publifai repo root (the repo that contains `clients/`):
+
+```bash
+cd <publifai-repo-root>
+./scripts/deploy-client.sh <client-folder>
+```
+
+### Update `client.json`
+
+After deploy succeeds, update:
+- `phases.B_capture.discover.audit_report.report_deployed_url` → `https://<slug>.pages.dev/audit/` (the audit has moved).
+- Standard clone completion fields below.
 
 ## Completion
 
