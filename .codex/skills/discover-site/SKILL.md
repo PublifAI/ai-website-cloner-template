@@ -700,7 +700,11 @@ Raw fetched HTML is cached under `$RESEARCH/raw/` (`robots.txt`, `llms.txt`, `<s
 }
 ```
 
-Hard rules: TL;DR ≤ 150 words total, no jargon ("CLS", "LCP", "render-blocking" are banned in TL;DR/wins/improve), every `improve.*` bullet must reference a real number from `audit-data.json`.
+Hard rules:
+- TL;DR ≤ 150 words total.
+- No jargon ("CLS", "LCP", "render-blocking", "TBT", "DOM", "viewport") in `tldr` / `wins` / `improve`.
+- Every `improve.*` bullet must reference a real number from `audit-data.json`.
+- **Every `improve.*` bullet must wrap its key fact in `<strong>…</strong>`** — usually the number, the missing thing, or the failing tag (e.g. `<strong>2.21 MB</strong>`, `<strong>No meta description</strong>`, `<strong>0 H1 headings</strong>`, `<strong>Google Business Profile is not linked</strong>`). The builder safelists `<strong>`, `<em>`, `<code>`, `<b>`, `<i>` and escapes everything else, so do NOT use any other tags. The card's accent colour will tint the strong text automatically.
 
 **Step B — Run the builder:**
 
