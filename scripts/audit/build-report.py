@@ -46,7 +46,21 @@ NARR = json.loads(NARR_PATH.read_text())
 
 BIZ_NAME = (CLIENT.get('branding', {}) or {}).get('business_name') or CLIENT.get('name') or CLIENT.get('slug')
 DOMAIN = CLIENT.get('domains', {}).get('custom') or (CLIENT.get('existing_site', {}) or {}).get('url', '').replace('https://','').replace('http://','').strip('/')
+SUBDOMAIN = (CLIENT.get('domains', {}) or {}).get('subdomain') or f"{CLIENT.get('slug','')}.publifai.in"
+PUBLIC_URL = f"https://{SUBDOMAIN}/"
 TODAY = datetime.date.today().strftime("%B %Y")
+OG_DESC = f"Publifai's website review for {BIZ_NAME} — speed, SEO, AI search readiness, and a week-one rebuild plan."
+
+# Resolve the logo source (if any) and the matching og image filename. We
+# preserve the original extension so /og.png isn't actually a JPEG.
+LOGO_SRC = None
+for _ext in ('png', 'jpg', 'jpeg', 'webp', 'svg'):
+    _cand = ROOT/f'assets/images/logo.{_ext}'
+    if _cand.exists():
+        LOGO_SRC = _cand
+        break
+OG_FILENAME = f"og.{LOGO_SRC.suffix.lstrip('.')}" if LOGO_SRC else "og.png"
+OG_URL = f"{PUBLIC_URL}{OG_FILENAME}"
 
 def b64(rel):
     p = ROOT/rel
@@ -217,6 +231,20 @@ HTML = f'''<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>{BIZ_NAME} — Website Review by Publifai</title>
+<meta name="description" content="{OG_DESC}">
+<link rel="canonical" href="{PUBLIC_URL}">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Publifai">
+<meta property="og:title" content="{BIZ_NAME} — Website Review">
+<meta property="og:description" content="{OG_DESC}">
+<meta property="og:url" content="{PUBLIC_URL}">
+<meta property="og:image" content="{OG_URL}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{BIZ_NAME} — Website Review">
+<meta name="twitter:description" content="{OG_DESC}">
+<meta name="twitter:image" content="{OG_URL}">
 <style>
   *{{box-sizing:border-box}}
   html{{scroll-behavior:smooth}}
@@ -293,6 +321,10 @@ HTML = f'''<!DOCTYPE html>
   .snippet-body{{background:#fff;padding:10px 12px;border-radius:4px;font-size:13px;border:1px solid #eee}}
   footer{{margin-top:50px;padding-top:20px;border-top:1px solid #eee;font-size:12px;color:#888;text-align:center}}
   .opportunity-frame{{background:#e3f2fd;border-left:3px solid #1976d2;padding:14px 18px;border-radius:4px;font-size:14px;margin-top:18px}}
+  .perf-subnav{{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 22px;padding:12px 14px;background:#fafafa;border:1px solid #eee;border-radius:6px}}
+  .perf-subnav .lbl{{font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#888;font-weight:700;margin-right:6px;align-self:center}}
+  .perf-subnav a{{display:inline-block;padding:5px 12px;border-radius:999px;background:#fff;border:1px solid #e0e0e0;color:#333;text-decoration:none;font-size:13px}}
+  .perf-subnav a:hover{{background:#1a1a1a;color:#fff;border-color:#1a1a1a}}
   @media print{{nav.sticky{{display:none}}body{{background:#fff}}.wrap{{box-shadow:none;max-width:100%}}}}
   @media (max-width:680px){{.stat-strip,.swatches,.comp-grid,.reco,.page-screenshots{{grid-template-columns:1fr}}.gauges{{flex-direction:column}}}}
 </style>
@@ -380,6 +412,10 @@ HTML = f'''<!DOCTYPE html>
 
 <section id="perf">
   <h2>Performance — page by page</h2>
+  <div class="perf-subnav">
+    <span class="lbl">Jump to page</span>
+    {''.join(f'<a href="#page-{p["slug"]}">{p.get("display_name", p["slug"].replace("-"," ").title())}</a>' for p in NARR.get('pages_to_render', []))}
+  </div>
   {''.join(page_block(p['slug'], p.get('display_name', p['slug'].replace('-',' ').title())) for p in NARR.get('pages_to_render', []))}
 </section>
 
@@ -432,6 +468,15 @@ pub = ROOT/'public/index.html'
 pub.parent.mkdir(parents=True, exist_ok=True)
 pub.write_text(HTML)
 print(f"wrote {pub}")
+
+# Copy the client logo to public/og.png so WhatsApp/Twitter link previews
+# resolve. data: URIs in og:image are NOT followed by social crawlers — they
+# need a real http(s) URL. Logo is a placeholder until we add a generated
+# share card; it still beats a broken preview.
+if LOGO_SRC:
+    og_out = ROOT/f'public/{OG_FILENAME}'
+    og_out.write_bytes(LOGO_SRC.read_bytes())
+    print(f"wrote {og_out} (from {LOGO_SRC.name})")
 
 # Write internal-only marketing snippets to a separate file the local
 # dashboard reads. Never shipped to the client-facing report.
