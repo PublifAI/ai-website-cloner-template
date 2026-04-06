@@ -718,12 +718,12 @@ The deploy source of truth is `clients/<client-folder>/public/`. Every Publifai 
    <!DOCTYPE html>
    <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>[Business Name] — Coming soon on Publifai</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:10vh auto;padding:0 24px;color:#1a1a1a}h1{font-size:28px;margin-bottom:8px}p{line-height:1.6;color:#555}a{display:inline-block;margin-top:16px;padding:10px 18px;background:#111;color:#fff;text-decoration:none;border-radius:6px}a:hover{background:#333}</style></head><body><h1>[Business Name]</h1><p>Your new website is being built on Publifai. In the meantime, here is the review we prepared of your current site.</p><a href="/audit/">View the site review →</a></body></html>
    ```
-4. **Call the publifai-level deploy script** from the publifai repo root (the repo that contains `clients/`):
+4. **Call the publifai-level deploy script** from the publifai repo root (the repo that contains `clients/`). Pass only the **client folder name** — the script reads the Pages project slug from `client.json`:
    ```bash
    cd <publifai-repo-root>
-   ./scripts/deploy-client.sh <slug> <client-folder>
+   ./scripts/deploy-client.sh <client-folder>
    ```
-   The script runs `wrangler pages deploy` against `clients/<client-folder>/public/` on `--branch=main`. It also appends a deploy note to `client.json`.
+   The script stages the folder (ignoring `client.json` and dotfiles), deploys via `wrangler pages deploy` to the project's production branch, and appends a deploy note to `client.json`.
 5. **Update client.json** (in addition to the note the script adds):
    - `phases.B_capture.discover.audit_report.report_deployed_url` = `https://<slug>.pages.dev/audit/`
 
