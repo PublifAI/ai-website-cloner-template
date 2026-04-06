@@ -702,9 +702,26 @@ Raw fetched HTML is cached under `$RESEARCH/raw/` (`robots.txt`, `llms.txt`, `<s
 
 Hard rules:
 - TL;DR ≤ 150 words total.
-- No jargon ("CLS", "LCP", "render-blocking", "TBT", "DOM", "viewport") in `tldr` / `wins` / `improve`.
-- Every `improve.*` bullet must reference a real number from `audit-data.json`.
-- **Every `improve.*` bullet must wrap its key fact in `<strong>…</strong>`** — usually the number, the missing thing, or the failing tag (e.g. `<strong>2.21 MB</strong>`, `<strong>No meta description</strong>`, `<strong>0 H1 headings</strong>`, `<strong>Google Business Profile is not linked</strong>`). The builder safelists `<strong>`, `<em>`, `<code>`, `<b>`, `<i>` and escapes everything else, so do NOT use any other tags. The card's accent colour will tint the strong text automatically.
+- **Zero jargon** in `tldr` / `wins` / `improve`. The owner is a small-business person, not a developer. Banned words anywhere in these fields: `CLS`, `LCP`, `TBT`, `FCP`, `DOM`, `viewport`, `render-blocking`, `JSON-LD`, `structured data`, `schema.org`, `Open Graph`, `og:image`, `og:`, `meta description`, `meta tag`, `H1`, `H2`, `heading tag`, `alt text`, `llms.txt`, `robots.txt`, `canonical`, `sitemap.xml`, `GPTBot`, `crawler`, `SSR`, `CSR`, `favicon` (say "browser tab icon"), `sameAs`.
+- Every `improve.*` bullet must reference a real number from `audit-data.json`, but translate the finding into **plain English of what the owner/customer experiences**. Use this translation table:
+
+  | Technical finding | Plain-English rewrite |
+  |---|---|
+  | No meta description | The Google result under your link has no description, so people don't click. |
+  | 0 H1 headings | The homepage never says its own name in a big headline. |
+  | No Open Graph image / og:image | When someone shares your link on WhatsApp or Instagram, the preview is broken/empty. |
+  | No JSON-LD / no structured data | AI assistants like ChatGPT and Perplexity can't read your catalogue, so they skip you. |
+  | GPTBot blocked / not listed | ChatGPT isn't allowed to read your site, so it can never recommend you. |
+  | No llms.txt | There's no "map" that tells AI search tools what your site is about. |
+  | Missing alt text on N images | Google can't tell what N of your photos are of — you lose image-search traffic. |
+  | Title tag too long / missing | Your Google result headline is cut off / blank. |
+  | Google Business Profile not linked | Your Google Maps listing isn't connected to your website, which is the #1 local trust signal. |
+  | No sameAs / social links | Google doesn't know your Instagram and Facebook belong to the same business. |
+  | Large CLS | The page jumps around while loading on mobile — people mis-tap and leave. |
+  | Slow LCP | The main image/headline takes too long to show up on mobile. |
+
+- **Every `improve.*` bullet must wrap its key fact in `<strong>…</strong>`** — usually the number or the plain-English problem (e.g. `<strong>2.21 MB of images</strong>`, `<strong>No Google description</strong>`, `<strong>No big homepage headline</strong>`, `<strong>Broken WhatsApp preview</strong>`, `<strong>ChatGPT can't read your catalogue</strong>`, `<strong>Google Maps listing not linked</strong>`). The builder safelists `<strong>`, `<em>`, `<code>`, `<b>`, `<i>` and escapes everything else, so do NOT use any other tags. The card's accent colour will tint the strong text automatically.
+- **Technical names belong only in the detail sections (5 SEO fundamentals, 6 AI search readiness), never in summary cards.** There, it's fine to say "JSON-LD" or "Open Graph" because those sections are the evidence layer.
 
 **Step B — Run the builder:**
 
@@ -730,7 +747,7 @@ Save to `$REPORT/index.html`. This is a **self-contained HTML file** with embedd
 
 The HTML must include, in this top-to-bottom order:
 
-0. **Sticky top nav** — pure CSS (`position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);`), horizontal pill row. On mobile it becomes a horizontal-scroll row (`overflow-x: auto; white-space: nowrap;`) — no hamburger. Hidden in print (`@media print { nav { display: none; } }`). Anchors: `#summary`, `#design`, `#peers` (only when competitors exist), `#geo`, `#perf`, `#recommendation`. Every section must have `id="..."` AND `scroll-margin-top: 80px`.
+0. **Sticky top nav** — pure CSS (`position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);`), horizontal pill row. On mobile it becomes a horizontal-scroll row (`overflow-x: auto; white-space: nowrap;`) — no hamburger. Hidden in print (`@media print { nav { display: none; } }`). Anchors: `#summary`, `#design`, `#peers` (only when competitors exist), `#seo`, `#ai-search`, `#perf`, `#recommendation`. Every section must have `id="..."` AND `scroll-margin-top: 80px`.
 
 1. **Header block** — client logo + business name + domain + "Prepared by Publifai" + date. Same as before.
 
@@ -755,11 +772,9 @@ The HTML must include, in this top-to-bottom order:
 
 4. **Peers (`#peers`)** — top-level section, **only rendered if `audit-data.derived.competitor_design[]` is non-empty**. Header: "How peers in your category present themselves". Contains the client's homepage thumbnail + 2-4 competitor thumbnails side-by-side, each with a one-line `does_well`, plus a single pattern-callout paragraph from `design.pattern_callout` that names a shared move the competitors make and contrasts it with the client. Written fresh each run from the screenshots + `design_language` fields — do not hardcode.
 
-5. **SEO & AI search (`#geo`)** — nav label "SEO & AI search". Two `<h3>` sub-sections:
+5. **SEO fundamentals (`#seo`)** — nav label "SEO". Top-level section (own `<h2>`). Per-page tag check table: one row per page in `pages_to_render`, columns: Title / Meta desc / OG image / H1 / Canonical. Built deterministically by the builder from `audited_pages[*].signals` — no narrative input needed. This is the evidence layer; technical names (meta description, H1, Open Graph, canonical) are fine here.
 
-   **5a. SEO fundamentals — per-page tag check** — auto-generated table with one row per page in `pages_to_render`, columns: Title / Meta desc / OG image / H1 / Canonical. Built deterministically by the builder from `audited_pages[*].signals` — no narrative input needed.
-
-   **5b. AI discoverability — can ChatGPT find you?** — opens with a one-line verdict (computed deterministically by the builder from `robots.bots` + `geo.jsonld_scorecard`), then the existing AI crawler access table, llms.txt paragraph (`geo.llms_txt_paragraph`), structured data scorecard (`geo.jsonld_scorecard`), and AI-ready quick wins (`geo.quick_wins`). Closes with `geo.opportunity_frame`.
+6. **AI search readiness (`#ai-search`)** — nav label "AI search". Top-level section (own `<h2>`), separate from SEO. Opens with a one-line verdict (computed deterministically by the builder from `robots.bots` + `geo.jsonld_scorecard`), then the AI crawler access table (GPTBot / PerplexityBot / ClaudeBot / Google-Extended / Applebot-Extended / CCBot / Bytespider), llms.txt paragraph (`geo.llms_txt_paragraph`), structured data scorecard (`geo.jsonld_scorecard`), and AI-ready quick wins (`geo.quick_wins`). Closes with `geo.opportunity_frame`. Technical names are fine here — this is the evidence layer.
 
 7. **Performance (`#perf`)** — existing PageSpeed gauges + Core Web Vitals table + per-page deep dives + WhatsApp share preview + Google SERP preview + favicon/tap-targets. Substance unchanged, just nav-addressable.
 
