@@ -27,7 +27,16 @@ This skill has THREE phases:
 
 ## Pre-Flight
 
-1. **Browser automation is required.** Check for available browser MCP tools (Chrome MCP, Playwright MCP, Browserbase MCP, Puppeteer MCP, etc.). Use whichever is available — if multiple exist, prefer Chrome MCP. If none are detected, ask the user which browser tool they have and how to connect it.
+1. **Screenshot tooling — headless Chrome is the DEFAULT, browser MCP is the fallback.** All Phase 2 screenshots should be captured via headless Chrome shell calls:
+   ```bash
+   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+     --headless=new --hide-scrollbars --disable-gpu \
+     --window-size=1440,900 --screenshot="$OUT/homepage-desktop.png" \
+     "https://example.com/"
+   ```
+   Use mobile width 390 and tablet 768 for the homepage extra pass. Browser MCP (Chrome MCP, Playwright MCP, etc.) is only needed if (a) the site is a JS-only SPA whose homepage doesn't render headlessly, or (b) you need to enumerate links on a CSR site for Phase 1. Do NOT call `mcp__claude-in-chrome__tabs_context_mcp` first — assume headless works and only escalate to browser MCP if a screenshot file comes back blank or < 10KB.
+
+2. **`cd` PERSISTS across Bash tool calls.** A `cd ai-website-cloner-template && node ...` will leave the next Bash call in that directory and break relative paths. Either use absolute paths everywhere, or wrap directory-scoped work in a subshell: `(cd ai-website-cloner-template && node scripts/audit/gather-audit-data.mjs ...)`.
 2. **Parse arguments from `$ARGUMENTS`:**
    - Extract the base URL (first non-flag argument). Normalize it (add `https://` if missing, strip trailing paths to get the domain root).
    - Check for `--client <name>` flag. If present, all output goes into a client-specific folder. If absent, fall back to repo-root paths for backward compatibility.
@@ -289,6 +298,15 @@ Read the homepage `<title>` tag from `$RESEARCH/raw/homepage.raw.html`. Strip co
 
 While the navigation crawl is still in flight (or as a second pass over `$RESEARCH/raw/<slug>.html` files), count every `<img>` tag and every `<img>` with a non-empty `alt` attribute. Aggregate into a single `site_wide_alt_coverage = { total_images, images_with_alt, coverage_pct }` object and **write it into `$RESEARCH/site-map.json` as a top-level field** — `gather-audit-data.mjs` reads it from there. (This replaces the old Phase-4 content-dir scan that `gather-audit-data.mjs` used to do.)
 
+**Bulk raw HTML fetch:** Phase 1 should curl every URL in `unique_pages[]` (not just the 3 audit pages) into `$RESEARCH/raw/<slug>.raw.html`, so the alt-coverage pass and any later text mining have real data. Use a desktop User-Agent on every curl:
+
+```bash
+curl -sSL -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
+     -o "$RESEARCH/raw/<slug>.raw.html" "<url>"
+```
+
+**Curl-status finding:** if any audit page returns HTTP 5xx/4xx to curl but renders fine in a real browser (verify with headless Chrome), record this in `audit-data.json` as a finding — link-preview bots, AI crawlers, and Googlebot's fallback fetcher will all see the curl status, not the browser status. It's a real GEO/share-preview problem that belongs in the report's "trust" bucket.
+
 ### Step 8: Download Site Assets (Logo + Favicon + OG)
 
 Download the minimum set of assets the audit report needs:
@@ -359,25 +377,22 @@ This phase **kills the old multi-layered color-scraping pipeline** (theme CSS pa
 
 ### Step 0: Screenshot Pre-Flight (HARD GATE)
 
-Before anything else in Phase 2, **prove that browser MCP can actually capture a screenshot of the live site.**
+Before anything else in Phase 2, **prove that headless Chrome can capture a screenshot of the live site.**
 
-1. Navigate to the homepage at 1440px using browser MCP.
-2. Attempt a full-page screenshot and save to `$SCREENSHOTS/homepage-desktop.png`.
-3. Verify the file exists and is > 10KB.
+1. Run headless Chrome at 1440x900 against the homepage and save to `$SCREENSHOTS/homepage-desktop.png` (see Pre-Flight #1 for the exact command).
+2. Verify the file exists and is > 10KB.
 
-**If the screenshot fails** (browser MCP not connected, navigation error, blocked by Cloudflare/bot protection, blank image, file < 10KB): **STOP Phase 2 immediately.** Report the failure and ask the user how to proceed. **Never fall back to a screenshot-less design system.**
-
-(This is the only place in the run that uses a browser for visual capture. Phase 1's browser use — if any — was for link enumeration only.)
+**If the screenshot fails** (blank image, file < 10KB, Chrome error): try once with browser MCP as a fallback. If both fail, **STOP Phase 2** and report. **Never fall back to a screenshot-less design system.**
 
 ### Step 1: Capture All Audit-Page Screenshots
 
-For **every page in `$RESEARCH/audit-pages.json`**, capture and save to `$SCREENSHOTS/`:
+For **every page in `$RESEARCH/audit-pages.json`**, capture and save to `$SCREENSHOTS/` using headless Chrome:
 
-- `<slug>-desktop.png` at 1440px (full page)
-- `<slug>-mobile.png` at 390px (full page)
-- Plus one extra pass **only for the homepage**: `homepage-tablet.png` at 768px (for design-system perception).
+- `<slug>-desktop.png` at 1440x900
+- `<slug>-mobile.png` at 390x844
+- Plus one extra pass **only for the homepage**: `homepage-tablet.png` at 768x1024
 
-**Skip-if-exists rule:** If a file already exists and is > 10KB, reuse it. This auto-preserves `homepage-desktop.png` from Step 0.
+**Skip-if-exists rule:** If a file already exists and is > 10KB, reuse it.
 
 After each new capture, verify the file exists and is > 10KB. Any failure → stop Phase 2.
 
@@ -390,7 +405,7 @@ Read `$RESEARCH/competitors.json` (written in Phase 1 Step 4.5). If `urls` is em
 Otherwise, for each competitor URL (max 4):
 1. Navigate to the URL at 1440px and capture `$SCREENSHOTS/competitors/<domain>-desktop.png` (full page).
 2. Navigate at 390px and capture `$SCREENSHOTS/competitors/<domain>-mobile.png`.
-3. Verify each screenshot > 10KB; log a warning and skip the competitor on failure — do not halt Phase 2.
+3. **Quality gate: each competitor desktop screenshot must be > 50KB** (not 10KB). SPA/Wix/React-only sites frequently render a near-blank ~24KB image under headless Chrome — embedding those in the report makes Publifai look broken. If a competitor's desktop shot is < 50KB, drop that competitor from `derived.competitor_design[]` entirely. Log it and move on; do not halt Phase 2.
 
 Then run a **single vision LLM pass per competitor** on their desktop screenshot and produce:
 - `design_language`: 1-2 sentence description of the visual style (palette, type, layout archetype)
@@ -660,7 +675,68 @@ Raw fetched HTML is cached under `$RESEARCH/raw/` (`robots.txt`, `llms.txt`, `<s
 
 ### Write the Report (HTML)
 
-### Write the Report (HTML)
+**The LLM does NOT write HTML inline.** Structural HTML, CSS, gauges, tables, and screenshot embedding live in the shared, generic builder at `ai-website-cloner-template/scripts/audit/build-report.py`. Your job here is to write a small **narrative overlay JSON** and then run the builder.
+
+**Step A — Write `$RESEARCH/report-narrative.json`** with this shape (every field is plain-English narrative the LLM synthesizes from `audit-data.json` + screenshots; no numbers it doesn't already know):
+
+```json
+{
+  "tldr": { "paragraphs": ["...", "...", "..."] },
+  "wins": ["...", "...", "..."],
+  "improve": {
+    "speed": ["..."],
+    "seo":   ["..."],
+    "geo":   ["..."],
+    "trust": ["..."]
+  },
+  "design": {
+    "your_card_one_liner": "...",
+    "layout_observations": "...",
+    "pattern_callout": "...",
+    "changes": ["...", "...", "..."]
+  },
+  "geo": {
+    "lead": "...",
+    "llms_txt_paragraph": "...",
+    "jsonld_scorecard": [{"type": "Organization", "present": false, "why": "..."}],
+    "quick_wins": ["..."],
+    "opportunity_frame": "..."
+  },
+  "recommendation": {
+    "option_a": "...",
+    "option_b": "...",
+    "closer": "..."
+  },
+  "snippets": {
+    "tweet": "...",
+    "whatsapp": "...",
+    "email_subject": "...",
+    "email_first_line": "..."
+  },
+  "hero_stats": [
+    {"big": "20", "label": "pages audited"},
+    {"big": "10", "label": "quick wins identified"},
+    {"big": "~0.6s", "label": "faster on mobile (est.)"}
+  ],
+  "pages_to_render": ["homepage", "about", "product-example"]
+}
+```
+
+Hard rules: TL;DR ≤ 150 words total, no jargon ("CLS", "LCP", "render-blocking" are banned in TL;DR/wins/improve), every `improve.*` bullet must reference a real number from `audit-data.json`.
+
+**Step B — Run the builder:**
+
+```bash
+python3 ai-website-cloner-template/scripts/audit/build-report.py "$CLIENTS_DIR/<name>"
+```
+
+It writes `$REPORT/index.html`, embeds screenshots and logo as base64, renders gauges and CWV tables from `audit-data.json`, and inserts the marker comment for `/clone-website` to detect later. Do not hand-edit the output HTML.
+
+The remainder of this section (down to "Deploy the Audit") is **legacy reference** describing the desired report content — useful for understanding what fields the narrative JSON should populate, but the LLM no longer writes HTML.
+
+---
+
+#### Legacy reference — desired report structure
 
 Save to `$REPORT/index.html`. This is a **self-contained HTML file** with embedded CSS — no external dependencies. It must look professional enough to share directly with a **lead** (before any clone or build has happened) AND function as marketing collateral.
 
@@ -996,7 +1072,7 @@ Audit goes to the **root** (`/`) so we can share a clean URL with leads before a
 **Steps:**
 
 1. **Read slug** from `client.json[slug]`.
-2. **Copy the report to the deploy root** — `$REPORT/index.html` → `$CLIENTS_DIR/<name>/public/index.html`. The HTML already contains the detector marker on the first line of `<body>`.
+2. **`public/index.html` is already written** by `build-report.py` (it writes both `report/index.html` and `public/index.html` in one pass). No manual copy needed.
 3. **Do not create a placeholder.** The audit *is* the root until clone runs.
 4. **Call the publifai-level deploy script:**
    ```bash
