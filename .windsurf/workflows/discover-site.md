@@ -723,41 +723,36 @@ Save to `$REPORT/index.html`. This is a **self-contained HTML file** with embedd
 
 The HTML must include, in this top-to-bottom order:
 
-0. **Sticky top nav** — pure CSS (`position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);`), horizontal pill row. On mobile it becomes a horizontal-scroll row (`overflow-x: auto; white-space: nowrap;`) — no hamburger. Hidden in print (`@media print { nav { display: none; } }`). Anchors: `#tldr`, `#wins`, `#improve`, `#design`, `#geo`, `#perf`, `#recommendation`. Every section must have `id="..."` AND `scroll-margin-top: 80px`.
+0. **Sticky top nav** — pure CSS (`position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);`), horizontal pill row. On mobile it becomes a horizontal-scroll row (`overflow-x: auto; white-space: nowrap;`) — no hamburger. Hidden in print (`@media print { nav { display: none; } }`). Anchors: `#summary`, `#design`, `#peers` (only when competitors exist), `#geo`, `#perf`, `#recommendation`. Every section must have `id="..."` AND `scroll-margin-top: 80px`.
 
 1. **Header block** — client logo + business name + domain + "Prepared by Publifai" + date. Same as before.
 
-2. **TL;DR (`#tldr`)** — NEW, plain English, **max 150 words**, zero jargon. Banned words: "CLS", "LCP", "render-blocking", "DOM", "viewport", "LCP", "TBT". Three paragraphs:
-   - ¶1 "Where your website stands today" — one verdict sentence + one headline stat (e.g., "your homepage is 4.8 MB — about 4x heavier than it needs to be").
+2. **Summary (`#summary`)** — single wrapper with one `<h2>The summary</h2>` and four `<h3>` children, in this order:
+
+   **2a. Short version** — TL;DR paragraphs from `tldr.paragraphs`. Plain English, **max 150 words total**, zero jargon. Banned words: "CLS", "LCP", "render-blocking", "DOM", "viewport", "TBT". Three paragraphs:
+   - ¶1 "Where your website stands today" — one verdict sentence + one headline stat.
    - ¶2 "Biggest opportunity" — highest-leverage improvement, in the owner's language.
    - ¶3 "What we'd do in week one" — 3 concrete shipped outcomes, no tech terms.
-   - **Hard constraint:** if your draft is over 150 words, cut ruthlessly before rendering.
+   - **Hard constraint:** if your draft is over 150 words, cut ruthlessly.
 
-3. **What works (`#wins`)** — NEW, 3-5 positive bullets drawn from the *same* `audit-data.json`. Examples: "JSON-LD structured data is in place on your homepage", "Mobile accessibility scores 95/100", "Your sitemap is published and healthy". Must be real findings, not fillers.
+   **2b. Stat strip** — three big-number stats from `hero_stats[]`.
 
-4. **What to improve (`#improve`)** — the old Numeric Findings content, reorganized under **four subheadings**:
-   - **Speed & weight** — today MB, target MB, CLS-driven conversion drag callout.
-   - **SEO fundamentals** — title, meta description, canonical, heading hierarchy, alt text coverage.
-   - **AI search readiness (GEO)** — all 8 GEO checks + the new **Entity Completeness** row sourced from `audit-data.entity.completeness_pct` and the sub-fields (org_name, founding_date, address, phone, hours, founder_name).
-   - **Trust signals** — GBP linked, social presence, directory profiles (from `audit-data.social` + `audit-data.entity`).
-   - Every bullet still carries a real number.
+   **2c. What's already working** — 3-5 positive bullets drawn from `audit-data.json`. Real findings, not fillers.
 
-5. **Design (`#design`)** — NEW section, three subsections:
+   **2d. What to improve** — the old Numeric Findings content, rendered as **four visual cards** (Speed, SEO, AI search, Trust), each with an icon, count badge, and colored left border. Cards are populated from `improve.speed`, `improve.seo`, `improve.geo`, `improve.trust`. **Every bullet must carry a real number, and the list must remain exhaustive — do NOT trim items, the audit is supposed to surface everything.**
 
-   **5a. Your current design at a glance**
-   - Homepage desktop + mobile screenshots (base64-embedded from Phase 2).
-   - Color palette: rendered swatches with hex + friendly names (from `client.json[design][colors]`).
-   - Typography: heading + body pairing, each rendered as a live sample at 32px / 16px.
-   - Layout observations: free-text from Phase 2's vision LLM description (vibe + layout archetype).
+3. **Design (`#design`)** — three subsections, no competitor block here anymore:
+   - **Your current design at a glance** — homepage desktop + mobile screenshots, vibe line, layout observations from `design.layout_observations`.
+   - **Color palette** — rendered swatches with hex + friendly names from `client.json[design][colors]`.
+   - **What we'd change** — 3-5 concrete, opinionated design moves from `design.changes`.
 
-   **5b. Category benchmark** — **render only if `audit-data.derived.competitor_design[]` is non-empty.**
-   - 2-4 competitor homepage thumbnails side-by-side with the client's homepage thumbnail.
-   - Under each competitor: one-line "what they do well" (`does_well` field).
-   - One pattern-callout paragraph that names a shared move the competitors make and contrasts it with the client (e.g., *"All three use a full-bleed hero with a single CTA; yours uses a 4-column grid above the fold, which fragments attention."*). Write this fresh each run from the actual screenshots + design_language fields — do not hardcode.
+4. **Peers (`#peers`)** — top-level section, **only rendered if `audit-data.derived.competitor_design[]` is non-empty**. Header: "How peers in your category present themselves". Contains the client's homepage thumbnail + 2-4 competitor thumbnails side-by-side, each with a one-line `does_well`, plus a single pattern-callout paragraph from `design.pattern_callout` that names a shared move the competitors make and contrasts it with the client. Written fresh each run from the screenshots + `design_language` fields — do not hardcode.
 
-   **5c. What we'd change** — 3-5 concrete, opinionated design moves ("drop the 4-col grid above the fold for a single full-bleed artwork carousel", "swap the uppercase nav for title case in a serif that matches your wordmark"). Anchor each with a competitor thumbnail if available, otherwise text-only.
+5. **SEO & AI search (`#geo`)** — nav label "SEO & AI search". Two `<h3>` sub-sections:
 
-6. **SEO & AI search (`#geo`)** — the existing GEO section, pulled out as a top-level nav-addressable section. Substance unchanged: AI crawler access table, llms.txt status, structured data scorecard, entity signals (now cross-linked with the Entity Completeness row in #improve), content extractability, heading/link quality, optional live citation test, AI-ready quick wins checklist.
+   **5a. SEO fundamentals — per-page tag check** — auto-generated table with one row per page in `pages_to_render`, columns: Title / Meta desc / OG image / H1 / Canonical. Built deterministically by the builder from `audited_pages[*].signals` — no narrative input needed.
+
+   **5b. AI discoverability — can ChatGPT find you?** — opens with a one-line verdict (computed deterministically by the builder from `robots.bots` + `geo.jsonld_scorecard`), then the existing AI crawler access table, llms.txt paragraph (`geo.llms_txt_paragraph`), structured data scorecard (`geo.jsonld_scorecard`), and AI-ready quick wins (`geo.quick_wins`). Closes with `geo.opportunity_frame`.
 
 7. **Performance (`#perf`)** — existing PageSpeed gauges + Core Web Vitals table + per-page deep dives + WhatsApp share preview + Google SERP preview + favicon/tap-targets. Substance unchanged, just nav-addressable.
 

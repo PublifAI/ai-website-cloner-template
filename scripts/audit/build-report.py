@@ -191,7 +191,7 @@ robots_rows = ''.join(
 )
 
 # Competitor cards
-comp_html = ''
+peers_section_html = ''
 if COMPS:
     your_home = asset('research/screenshots/homepage-desktop.png', 'homepage-desktop.png')
     your_card = f'<div class="ccard you"><img src="{your_home}" alt="{DOMAIN}"/><div class="cmeta"><div class="cdom">{DOMAIN} (you)</div><div class="cdo">{NARR.get("design",{}).get("your_card_one_liner","")}</div></div></div>'
@@ -199,14 +199,51 @@ if COMPS:
         f'<div class="ccard"><img src="{c["_d"]}" alt="{c["domain"]}"/><div class="cmeta"><div class="cdom">{c["domain"]}</div><div class="cdo"><strong>What they do well:</strong> {c["does_well"]}</div></div></div>'
         for c in COMPS
     )
-    comp_html = f'''
-    <h3>How peer sites in your category present themselves</h3>
-    <div class="comp-grid">{your_card}{cards}</div>
-    <p class="pattern-callout">{NARR.get("design",{}).get("pattern_callout","")}</p>
-    '''
+    peers_section_html = f'''
+<section id="peers">
+  <h2>How peers in your category present themselves</h2>
+  <div class="comp-grid">{your_card}{cards}</div>
+  <p class="pattern-callout">{NARR.get("design",{}).get("pattern_callout","")}</p>
+</section>
+'''
 
 def ul(items):
     return '<ul>' + ''.join(f'<li>{x}</li>' for x in (items or [])) + '</ul>'
+
+def improve_card(icon, title, items, accent_color):
+    if not items: return ''
+    lis = ''.join(f'<li>{x}</li>' for x in items)
+    return f'''
+    <div class="imp-card" style="--accent:{accent_color}">
+      <div class="imp-head">
+        <span class="imp-icon">{icon}</span>
+        <h3>{title}</h3>
+        <span class="imp-count">{len(items)}</span>
+      </div>
+      <ul>{lis}</ul>
+    </div>'''
+
+def seo_per_page_table():
+    rows = []
+    for p in NARR.get('pages_to_render', []):
+        slug = p if isinstance(p, str) else p['slug']
+        name = p if isinstance(p, str) else p.get('display_name', slug)
+        if slug not in PAGES: continue
+        s = PAGES[slug]['signals']
+        def cell(ok):
+            cls = 'pass' if ok else 'fail'
+            label = '✓' if ok else '✗'
+            return f'<td><span class="pill {cls}">{label}</span></td>'
+        rows.append(
+            f'<tr><td><strong>{name}</strong></td>'
+            f'{cell(bool(s.get("title")) and 25 <= (s.get("title_length") or 0) <= 65)}'
+            f'{cell(bool(s.get("meta_description")))}'
+            f'{cell(bool(s.get("og_image")))}'
+            f'{cell((s.get("h1_count") or 0) == 1)}'
+            f'{cell(bool(s.get("canonical")))}'
+            f'</tr>'
+        )
+    return ''.join(rows)
 
 def wins_ul(items):
     return '<ul class="wins-list">' + ''.join(f'<li>{x}</li>' for x in (items or [])) + '</ul>'
@@ -221,7 +258,13 @@ def jsonld_rows():
 
 def quick_wins_li():
     items = NARR.get('geo', {}).get('quick_wins', [])
-    return ''.join(f'<li>✓ <strong>{i["time"]}</strong> — {i["text"]}</li>' for i in items)
+    out = []
+    for i in items:
+        if isinstance(i, dict):
+            out.append(f'<li>✓ <strong>{i.get("time","")}</strong> — {i.get("text","")}</li>')
+        else:
+            out.append(f'<li>✓ {i}</li>')
+    return ''.join(out)
 
 # TL;DR + improvement bullets all come from narrative JSON
 TLDR = NARR.get('tldr', {})
@@ -230,6 +273,9 @@ IMPROVE = NARR.get('improve', {})
 DESIGN_NARR = NARR.get('design', {})
 GEO = NARR.get('geo', {})
 RECO = NARR.get('recommendation', {})
+for _k in ('option_a','option_b'):
+    if isinstance(RECO.get(_k), str):
+        RECO[_k] = {'title': 'Faithful Rebuild' if _k=='option_a' else 'Same Bones, New Look', 'body': RECO[_k], 'week_one': ''}
 SNIPPETS = NARR.get('snippets', {})
 
 # Auto-generate the "share with client" WhatsApp message if the narrative
@@ -242,6 +288,17 @@ if not SNIPPETS.get('client_share'):
         f"what's working, what we'd improve, and what we'd ship in week one:\n\n{PUBLIC_URL}\n\n"
         f"All of this is what we'll fix when we build your new website."
     )
+
+_jsonld_scorecard = NARR.get('geo', {}).get('jsonld_scorecard', []) or []
+discoverable = (
+    not any(v == 'blocked' for v in (ROBOTS.get('bots') or {}).values())
+    and any(r.get('status') == 'pass' for r in _jsonld_scorecard)
+)
+ai_verdict = (
+    "Yes — your site is reachable, but you've given AI engines almost nothing to anchor to."
+    if discoverable else
+    "Not really — at least one major AI crawler can't reach you, and there's no structured data to anchor a citation."
+)
 
 stats_html = ''.join(
     f'<div class="stat"><div class="big">{s["value"]}</div><div class="label">{s["label"]}</div></div>'
@@ -305,6 +362,16 @@ HTML = f'''<!DOCTYPE html>
   .improve-grid ul{{margin:10px 0 22px;padding-left:20px}}
   .improve-grid li{{margin-bottom:8px;color:#3a3a3a}}
   .improve-grid strong{{color:#c43e10;font-weight:700}}
+  .imp-grid{{display:grid;grid-template-columns:1fr;gap:14px;margin:16px 0 8px}}
+  .imp-card{{background:#fff;border:1px solid #ececec;border-left:4px solid var(--accent,#c43e10);border-radius:10px;padding:16px 18px 6px;box-shadow:0 1px 2px rgba(0,0,0,0.03)}}
+  .imp-head{{display:flex;align-items:center;gap:10px;margin-bottom:4px}}
+  .imp-head h3{{margin:0;font-size:15px;font-weight:700;color:#181818;text-transform:none;letter-spacing:0;border:none;padding:0;flex:1}}
+  .imp-icon{{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:color-mix(in srgb,var(--accent) 14%,#fff);font-size:15px;line-height:1}}
+  .imp-count{{display:inline-block;min-width:24px;text-align:center;padding:2px 9px;border-radius:999px;background:var(--accent);color:#fff;font-size:11px;font-weight:700}}
+  .imp-card ul{{margin:8px 0 10px;padding-left:20px}}
+  .imp-card li{{margin-bottom:7px;color:#3a3a3a;font-size:14px}}
+  .imp-card strong{{color:var(--accent);font-weight:700}}
+  @media (min-width:760px){{.imp-grid{{grid-template-columns:1fr 1fr}}}}
   .swatches{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}}
   .sw{{display:flex;gap:12px;align-items:center;background:#f7f7f8;padding:11px 14px;border-radius:8px;border:1px solid #ececec}}
   .sw .dot{{width:34px;height:34px;border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08)}}
@@ -364,10 +431,9 @@ HTML = f'''<!DOCTYPE html>
 <div class="wrap">
 
 <nav class="sticky">
-  <a href="#tldr">The short version</a>
-  <a href="#wins">What works</a>
-  <a href="#improve">What to improve</a>
+  <a href="#summary">Summary</a>
   <a href="#design">Design</a>
+  {'<a href="#peers">Peers</a>' if COMPS else ''}
   <a href="#geo">SEO &amp; AI search</a>
   <a href="#perf">Performance</a>
   <a href="#recommendation">Recommendation</a>
@@ -382,24 +448,24 @@ HTML = f'''<!DOCTYPE html>
   </div>
 </header>
 
-<section id="tldr" class="tldr">
-  <h2>The short version</h2>
+<section id="summary" class="tldr improve-grid">
+  <h2>The summary</h2>
+
+  <h3>Short version</h3>
   {''.join(f'<p>{p}</p>' for p in TLDR.get('paragraphs', []))}
-</section>
 
-<div class="stat-strip">{stats_html}</div>
+  <div class="stat-strip">{stats_html}</div>
 
-<section id="wins">
-  <h2>What's already working</h2>
+  <h3>What's already working</h3>
   {wins_ul(WINS)}
-</section>
 
-<section id="improve" class="improve-grid">
-  <h2>What to improve</h2>
-  <h3>Speed &amp; weight</h3>{ul(IMPROVE.get('speed'))}
-  <h3>SEO fundamentals</h3>{ul(IMPROVE.get('seo'))}
-  <h3>AI search readiness (GEO)</h3>{ul(IMPROVE.get('geo'))}
-  <h3>Trust signals</h3>{ul(IMPROVE.get('trust'))}
+  <h3>What to improve</h3>
+  <div class="imp-grid">
+    {improve_card('⚡', 'Speed &amp; weight', IMPROVE.get('speed'), '#dc2626')}
+    {improve_card('🔍', 'SEO fundamentals', IMPROVE.get('seo'), '#d97706')}
+    {improve_card('🤖', 'AI search readiness', IMPROVE.get('geo'), '#1d4ed8')}
+    {improve_card('🛡', 'Trust signals', IMPROVE.get('trust'), '#7c3aed')}
+  </div>
 </section>
 
 <section id="design">
@@ -408,45 +474,55 @@ HTML = f'''<!DOCTYPE html>
   <div class="page-screenshots">{page_screenshots('homepage')}</div>
   <p><strong>Vibe:</strong> {DESIGN.get('vibe','')}.</p>
   <p>{DESIGN_NARR.get('layout_observations','')}</p>
-  <h4 style="margin:18px 0 8px;color:#888;font-size:13px;text-transform:uppercase">Current palette</h4>
+  <h3>Color palette</h3>
   <div class="swatches">{swatches_html}</div>
-  {comp_html}
   <h3>What we'd change</h3>
   {ul(DESIGN_NARR.get('changes'))}
 </section>
 
+{peers_section_html}
+
 <section id="geo">
-  <h2>SEO &amp; AI search visibility</h2>
+  <h2>SEO &amp; AI search</h2>
   <p class="lead">{GEO.get('lead','')}</p>
 
-  <h3>AI crawler access</h3>
+  <h3>SEO fundamentals — per-page tag check</h3>
+  <table>
+    <thead><tr><th>Page</th><th>Title</th><th>Meta desc</th><th>OG image</th><th>H1</th><th>Canonical</th></tr></thead>
+    <tbody>{seo_per_page_table()}</tbody>
+  </table>
+
+  <h3>AI discoverability — can ChatGPT find you?</h3>
+  <p class="opportunity-frame"><strong>{ai_verdict}</strong></p>
+
+  <h4 style="margin:18px 0 8px;color:#888;font-size:13px;text-transform:uppercase;letter-spacing:0.5px">AI crawler access</h4>
   <table>
     <thead><tr><th>Crawler</th><th>Status</th><th>What it means</th></tr></thead>
     <tbody>{robots_rows}</tbody>
   </table>
 
-  <h3>llms.txt</h3>
+  <h4 style="margin:18px 0 8px;color:#888;font-size:13px;text-transform:uppercase;letter-spacing:0.5px">llms.txt</h4>
   <p>{GEO.get('llms_txt_paragraph','')}</p>
 
-  <h3>Structured data scorecard</h3>
+  <h4 style="margin:18px 0 8px;color:#888;font-size:13px;text-transform:uppercase;letter-spacing:0.5px">Structured data scorecard</h4>
   <table>
     <thead><tr><th>Schema type</th><th>Status</th><th>Why it matters</th></tr></thead>
     <tbody>{jsonld_rows()}</tbody>
   </table>
 
-  <h3>AI-ready quick wins checklist</h3>
+  <h4 style="margin:18px 0 8px;color:#888;font-size:13px;text-transform:uppercase;letter-spacing:0.5px">AI-ready quick wins</h4>
   <ul>{quick_wins_li()}</ul>
 
-  <p class="opportunity-frame"><strong>{GEO.get('opportunity_frame','')}</strong></p>
+  <p class="opportunity-frame" style="margin-top:18px"><strong>{GEO.get('opportunity_frame','')}</strong></p>
 </section>
 
 <section id="perf">
   <h2>Performance — page by page</h2>
   <div class="perf-subnav">
     <span class="lbl">Jump to page</span>
-    {''.join(f'<a href="#page-{p["slug"]}">{p.get("display_name", p["slug"].replace("-"," ").title())}</a>' for p in NARR.get('pages_to_render', []))}
+    {''.join(f'<a href="#page-{(p if isinstance(p,str) else p["slug"])}">{(p.replace("-"," ").title() if isinstance(p,str) else p.get("display_name", p["slug"].replace("-"," ").title()))}</a>' for p in NARR.get('pages_to_render', []))}
   </div>
-  {''.join(page_block(p['slug'], p.get('display_name', p['slug'].replace('-',' ').title())) for p in NARR.get('pages_to_render', []))}
+  {''.join(page_block(p, p.replace('-',' ').title()) if isinstance(p,str) else page_block(p['slug'], p.get('display_name', p['slug'].replace('-',' ').title())) for p in NARR.get('pages_to_render', []))}
 </section>
 
 <section id="recommendation">
@@ -456,7 +532,7 @@ HTML = f'''<!DOCTYPE html>
       <div class="badge">Recommended</div>
       <h3>{RECO.get('option_a',{}).get('title','')}</h3>
       <p>{RECO.get('option_a',{}).get('body','')}</p>
-      <div class="week-one"><strong>Week one we'd ship:</strong> {RECO.get('option_a',{}).get('week_one','')}</div>
+      {f'<div class="week-one"><strong>Week one we\'d ship:</strong> {RECO.get("option_a",{}).get("week_one","")}</div>' if RECO.get('option_a',{}).get('week_one') else ''}
     </div>
     <div class="reco-card">
       <h3>{RECO.get('option_b',{}).get('title','')}</h3>
