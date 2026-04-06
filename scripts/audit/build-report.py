@@ -62,13 +62,25 @@ for _ext in ('png', 'jpg', 'jpeg', 'webp', 'svg'):
 OG_FILENAME = f"og.{LOGO_SRC.suffix.lstrip('.')}" if LOGO_SRC else "og.png"
 OG_URL = f"{PUBLIC_URL}{OG_FILENAME}"
 
-def b64(rel):
-    p = ROOT/rel
-    if not p.exists() or p.stat().st_size < 100: return None
-    mime = mimetypes.guess_type(str(p))[0] or 'image/png'
-    return f"data:{mime};base64,{base64.b64encode(p.read_bytes()).decode()}"
+PUBLIC = ROOT/'public'
+ASSETS = PUBLIC/'assets'
+ASSETS.mkdir(parents=True, exist_ok=True)
 
-LOGO = b64('assets/images/logo.png') or b64('assets/images/logo.svg') or b64('assets/images/logo.jpg') or b64('assets/images/logo.webp')
+def asset(rel, dest_name=None):
+    """Copy ROOT/rel into public/assets/<dest_name> and return the relative
+    URL the HTML should use. Returns None if the source doesn't exist or is
+    too small to be a real image."""
+    p = ROOT/rel
+    if not p.exists() or p.stat().st_size < 100:
+        return None
+    name = dest_name or p.name
+    out = ASSETS/name
+    out.write_bytes(p.read_bytes())
+    return f"assets/{name}"
+
+LOGO = None
+if LOGO_SRC:
+    LOGO = asset(str(LOGO_SRC.relative_to(ROOT)), f"logo.{LOGO_SRC.suffix.lstrip('.')}")
 
 PAGES = {p['slug']: p for p in DATA['audited_pages']}
 HEAD = DATA['derived']['headline']
@@ -78,7 +90,7 @@ COMPS = []
 for c in DATA['derived'].get('competitor_design', []) or []:
     sd = ROOT/c['desktop_screenshot']
     if sd.exists() and sd.stat().st_size > 50000:
-        c['_d'] = b64(c['desktop_screenshot'])
+        c['_d'] = asset(c['desktop_screenshot'], f"competitor-{c['domain']}-desktop.png")
         COMPS.append(c)
 
 def gauge(score, label):
@@ -94,11 +106,11 @@ def cwv_row(label, m, d):
     return f'<tr><td>{label}</td><td>{pill(m["displayValue"], m.get("score"))}</td><td>{pill(d["displayValue"], d.get("score"))}</td></tr>'
 
 def page_screenshots(slug):
-    d = b64(f'research/screenshots/{slug}-desktop.png')
-    m = b64(f'research/screenshots/{slug}-mobile.png')
+    d = asset(f'research/screenshots/{slug}-desktop.png', f'{slug}-desktop.png')
+    m = asset(f'research/screenshots/{slug}-mobile.png', f'{slug}-mobile.png')
     parts = []
-    if d: parts.append(f'<figure><img src="{d}" alt="{slug} desktop"/><figcaption>Desktop · 1440px</figcaption></figure>')
-    if m: parts.append(f'<figure><img src="{m}" alt="{slug} mobile"/><figcaption>Mobile · 390px</figcaption></figure>')
+    if d: parts.append(f'<figure><img src="{d}" alt="{slug} desktop" loading="lazy"/><figcaption>Desktop · 1440px</figcaption></figure>')
+    if m: parts.append(f'<figure><img src="{m}" alt="{slug} mobile" loading="lazy"/><figcaption>Mobile · 390px</figcaption></figure>')
     return ''.join(parts)
 
 def page_block(slug, name):
@@ -181,7 +193,7 @@ robots_rows = ''.join(
 # Competitor cards
 comp_html = ''
 if COMPS:
-    your_home = b64('research/screenshots/homepage-desktop.png')
+    your_home = asset('research/screenshots/homepage-desktop.png', 'homepage-desktop.png')
     your_card = f'<div class="ccard you"><img src="{your_home}" alt="{DOMAIN}"/><div class="cmeta"><div class="cdom">{DOMAIN} (you)</div><div class="cdo">{NARR.get("design",{}).get("your_card_one_liner","")}</div></div></div>'
     cards = ''.join(
         f'<div class="ccard"><img src="{c["_d"]}" alt="{c["domain"]}"/><div class="cmeta"><div class="cdom">{c["domain"]}</div><div class="cdo"><strong>What they do well:</strong> {c["does_well"]}</div></div></div>'
@@ -464,17 +476,26 @@ HTML = f'''<!DOCTYPE html>
 </html>
 '''
 
-out = ROOT/'report/index.html'
-out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text(HTML)
-print(f"wrote {out} · {len(HTML):,} bytes")
-
-# Also drop a copy at public/index.html so deploy-client.sh ships it as the
-# pages.dev root (lead-magnet). /clone-website later moves this to /audit/.
+# Single HTML output, lives at public/index.html. All images are referenced
+# from public/assets/ via relative URLs — keeps page weight under ~50KB
+# instead of 15MB of base64. Deploy-client.sh ships the public/ folder as the
+# pages.dev root. /clone-website later moves this to /audit/.
 pub = ROOT/'public/index.html'
 pub.parent.mkdir(parents=True, exist_ok=True)
 pub.write_text(HTML)
-print(f"wrote {pub}")
+print(f"wrote {pub} · {len(HTML):,} bytes")
+
+# Mirror to report/index.html as a tiny redirect so anything still pointing
+# at the old location (dashboards, bookmarks) lands on the live deployed copy.
+report_out = ROOT/'report/index.html'
+report_out.parent.mkdir(parents=True, exist_ok=True)
+report_out.write_text(
+    f'<!doctype html><meta charset="utf-8"><title>Redirecting…</title>'
+    f'<meta http-equiv="refresh" content="0; url={PUBLIC_URL}">'
+    f'<link rel="canonical" href="{PUBLIC_URL}">'
+    f'<p>Redirecting to <a href="{PUBLIC_URL}">{PUBLIC_URL}</a>…</p>'
+)
+print(f"wrote {report_out} (redirect stub)")
 
 # Copy the client logo to public/og.png so WhatsApp/Twitter link previews
 # resolve. data: URIs in og:image are NOT followed by social crawlers — they
