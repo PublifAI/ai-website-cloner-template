@@ -316,17 +316,13 @@ Update `client.json[branding][logo_path]`, `branding.logo_source`, and `assets.f
 
 ### Step 9: Fetch PageSpeed Insights For Every Audit Page
 
-For each page in `$RESEARCH/audit-pages.json`, call the Google PSI API twice (mobile + desktop). Run in parallel where possible.
+Single command:
 
-Read `PSI_API_KEY` from the repo's `.env`. If missing, **stop** and tell the user to set it — the unauthenticated endpoint's shared quota is almost always exhausted. No fallback.
-
-```
-https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=<PAGE_URL>&strategy=<mobile|desktop>&category=performance&category=accessibility&category=seo&key=$PSI_API_KEY
+```bash
+node ai-website-cloner-template/scripts/audit/fetch-pagespeed.mjs "$CLIENTS_DIR/<name>"
 ```
 
-Save raw responses to `$RESEARCH/pagespeed/<slug>-<strategy>.json`. Do not parse them here — `extract-lighthouse.mjs` does that inside `gather-audit-data.mjs`.
-
-If a PSI call fails (timeout, 500, site unreachable), write a stub JSON with `{ "error": "..." }` so the gatherer knows the page was attempted but failed. This is the **one acceptable partial state** — because a single PSI fail shouldn't kill the run, but it must be visible in downstream output.
+Reads `audit-pages.json`, fetches mobile + desktop for every page in parallel (cap 6), writes raw responses to `$RESEARCH/pagespeed/<slug>-<strategy>.json`. Idempotent — skips files > 1KB. Hard-fails if `PSI_API_KEY` is missing from `.env`. Per-call failures land as `{ "error": "..." }` stubs so the gatherer can still run.
 
 ### Step 10: Run the Audit-Data Gathering Script
 
@@ -371,39 +367,22 @@ Goal: capture screenshots of every audit page at every viewport, then use a **vi
 
 This phase **kills the old multi-layered color-scraping pipeline** (theme CSS parse + frequency sampling + WordPress-defaults filter + semantic-element sampling + cross-reference + classification). All of that is replaced by "look at the picture and tell me the palette."
 
-### Step 0: Screenshot Pre-Flight (HARD GATE)
+### Step 0+1+2: Capture All Screenshots (single command, hard gate)
 
-Before anything else in Phase 2, **prove that headless Chrome can capture a screenshot of the live site.**
+```bash
+bash ai-website-cloner-template/scripts/audit/capture-screenshots.sh "$CLIENTS_DIR/<name>"
+```
 
-1. Run headless Chrome at 1440x900 against the homepage and save to `$SCREENSHOTS/homepage-desktop.png` (see Pre-Flight #1 for the exact command).
-2. Verify the file exists and is > 10KB.
+What it does:
+- Reads `$RESEARCH/audit-pages.json` and captures every audit page at desktop (1440x900) + mobile (390x844). Homepage gets an extra tablet (768x1024) pass.
+- Reads `$RESEARCH/competitors.json` and captures each competitor at desktop + mobile.
+- **Idempotent:** skips files > 10KB (preserves prior runs).
+- **Hard gate:** any audit-page capture that's missing or < 10KB exits non-zero — Phase 2 halts.
+- **SPA blank-render gate:** any competitor desktop shot < 50KB is deleted from disk and the competitor is implicitly dropped (the Phase 3 builder's `> 50KB` filter excludes it from `derived.competitor_design[]`).
 
-**If the screenshot fails** (blank image, file < 10KB, Chrome error): try once with browser MCP as a fallback. If both fail, **STOP Phase 2** and report. **Never fall back to a screenshot-less design system.**
+If the script fails on the audit pages (Chrome can't render the live site), **STOP Phase 2** and ask the user — never fall back to a screenshot-less design system.
 
-### Step 1: Capture All Audit-Page Screenshots
-
-For **every page in `$RESEARCH/audit-pages.json`**, capture and save to `$SCREENSHOTS/` using headless Chrome:
-
-- `<slug>-desktop.png` at 1440x900
-- `<slug>-mobile.png` at 390x844
-- Plus one extra pass **only for the homepage**: `homepage-tablet.png` at 768x1024
-
-**Skip-if-exists rule:** If a file already exists and is > 10KB, reuse it.
-
-After each new capture, verify the file exists and is > 10KB. Any failure → stop Phase 2.
-
-Expected total file count: `2 × len(audit-pages) + 1`.
-
-### Step 2: Capture Competitor Homepages
-
-Read `$RESEARCH/competitors.json` (written in Phase 1 Step 4.5). If `urls` is empty (`source: "none"`), skip this step entirely — the Phase 3 report's Category benchmark subsection will not render.
-
-Otherwise, for each competitor URL (max 4):
-1. Navigate to the URL at 1440px and capture `$SCREENSHOTS/competitors/<domain>-desktop.png` (full page).
-2. Navigate at 390px and capture `$SCREENSHOTS/competitors/<domain>-mobile.png`.
-3. **Quality gate: each competitor desktop screenshot must be > 50KB** (not 10KB). SPA/Wix/React-only sites frequently render a near-blank ~24KB image under headless Chrome — embedding those in the report makes Publifai look broken. If a competitor's desktop shot is < 50KB, drop that competitor from `derived.competitor_design[]` entirely. Log it and move on; do not halt Phase 2.
-
-Then run a **single vision LLM pass per competitor** on their desktop screenshot and produce:
+After this script succeeds, run a **single vision LLM pass per surviving competitor** on its desktop screenshot to produce:
 - `design_language`: 1-2 sentence description of the visual style (palette, type, layout archetype)
 - `does_well`: one-line "what they do well" observation (e.g., "full-bleed hero with a single CTA, no visual noise")
 
